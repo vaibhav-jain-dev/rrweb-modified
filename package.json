@@ -61,7 +61,12 @@
     "live-stream": "cd packages/rrweb && yarn live-stream",
     "lint": "yarn run concurrently --success=all -r -m=1 'yarn run markdownlint docs' 'ESLINT_USE_FLAT_CONFIG=false yarn eslint \"packages/**/src/**/*.{ts,tsx,js,jsx,svelte}\"'",
     "lint:report": "ESLINT_USE_FLAT_CONFIG=false yarn eslint --output-file eslint_report.json --format json \"packages/**/src/**/*.{ts,tsx,js,jsx}\"",
-    "release": "yarn build:all && changeset publish"
+    "release": "yarn build:all && changeset publish",
+    "ext:build": "yarn turbo run prepublish --filter=@rrweb/web-extension",
+    "ext:dev": "yarn workspace @rrweb/web-extension dev:chrome",
+    "ext:zip": "cross-env ZIP=true yarn ext:build",
+    "ext:test": "yarn vitest run --project @rrweb/web-extension",
+    "doctor": "node scripts/doctor.mjs"
   },
   "resolutions": {
     "**/cssom": "https://registry.npmjs.org/rrweb-cssom/-/rrweb-cssom-0.6.0.tgz",
@@ -71,5 +76,8 @@
     "defaults",
     "not op_mini all"
   ],
-  "packageManager": "yarn@1.22.19"
+  "packageManager": "yarn@1.22.19",
+  "engines": {
+    "node": ">=20 <25"
+  }
 }

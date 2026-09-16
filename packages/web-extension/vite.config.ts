@@ -5,8 +5,22 @@ import * as path from 'path';
 import type { PackageJson } from 'type-fest';
 import react from '@vitejs/plugin-react';
 import semver from 'semver';
+import { mergeManifestLayer } from './src/utils/manifest';
 
 const emptyOutDir = !process.argv.includes('--watch');
+
+// `vite-plugin-web-extension` runs several internal vite build() calls
+// even during `vite dev` (once per entry group, plus the manifest step),
+// and each one re-resolves defineConfig's own `command` argument as
+// 'build' rather than inheriting 'serve' from the outer CLI invocation -
+// only the manifest-writing step actually saw 'serve'. That mismatch is
+// what produced a split output (some files in dist/chrome, the manifest
+// expected in dist/chrome-dev) the first time this used `command` instead
+// of the CLI subcommand directly. process.argv[2] is set once, by the
+// actual `vite dev`/`vite build` invocation, and every nested build()
+// call this plugin makes runs inside that same process - so it stays
+// correct across all of them.
+const isDevServer = process.argv[2] === 'dev';
 
 function useSpecialFormat(
   entriesToUse: string[],
@@ -70,7 +84,19 @@ export default defineConfig({
     outDir: path.resolve(
       __dirname,
       'dist',
-      process.env.TARGET_BROWSER as string,
+      // `vite dev` and `vite build` must never share an output directory:
+      // a `dist/<browser>` built for production has plain bundled script
+      // tags, while dev mode injects HMR client tags pointing at
+      // http://localhost:5173, which MV3's CSP blocks outright. Sharing a
+      // directory meant loading the extension unpacked could silently
+      // pick up a mix of both, depending on which command ran last - a
+      // blank popup/options page with cross-world preload errors and CSP
+      // violations in the console, no code change required to trigger it.
+      // Separate directories make that class of bug impossible instead of
+      // relying on remembering to rebuild.
+      isDevServer
+        ? `${process.env.TARGET_BROWSER as string}-dev`
+        : (process.env.TARGET_BROWSER as string),
     ),
     emptyOutDir,
   },
@@ -103,9 +129,9 @@ export default defineConfig({
           version_name: rrwebVersion,
           ...commonManifest,
         };
-        Object.assign(
+        mergeManifestLayer(manifest, originalManifest[ManifestVersion].common);
+        mergeManifestLayer(
           manifest,
-          originalManifest[ManifestVersion].common,
           originalManifest[ManifestVersion][BrowserName],
         );
         return manifest;

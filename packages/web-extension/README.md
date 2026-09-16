@@ -8,6 +8,38 @@
 
 The package web-extension provides a browser extension for recording and replaying web pages.
 
+This package is built directly on top of [rrweb](../..)'s own record/replay
+engine (rrweb captures the DOM session; this extension is the browser
+chrome, popup, and storage around it) and adds a second, independent
+capture layer on top: an **evidence recorder** for DEV/staging debugging.
+Additional features beyond stock rrweb:
+
+- **CDP-based network + console capture** - attaches `chrome.debugger` to
+  the active tab (falling back to an in-page fetch/XHR shim when CDP can't
+  attach) to record every request/response and console line alongside the
+  rrweb event stream, not just DOM mutations.
+- **Structured evidence export** - Start/Stop Recording produces a
+  `recording-*.zip` containing a human/AI-readable `flow.md` narrative,
+  `actions.json`/`summary.json`, per-request `curl.sh` reproductions,
+  screenshots, and a UI-state digest, in addition to the raw rrweb events.
+- **Heuristic API-vs-UI reconciliation** (`findings.md`) - flags candidate
+  gaps such as an API field with no on-page representation, for a reviewer
+  or AI agent to verify, never as an asserted bug.
+- **Network relevance tiering + configurable exclusions** - every captured
+  request is scored `primary`/`secondary`/`noise`; **Settings → Network
+  exclusions** lets you toggle recommended defaults (Sentry, common
+  analytics/telemetry hosts, CORS preflights, the extension's own scripts)
+  or add custom host/URL patterns, so exported evidence stays focused on
+  your own backend API instead of telemetry noise.
+- **Credential redaction at capture time** - headers, cookies, JWTs,
+  bearer tokens, PEM blocks, and AWS keys are stripped before anything is
+  persisted, never at export time.
+- **App map** - a structural map of routes/components visited during a
+  session, built up incrementally as you navigate.
+
+See [`docs/build-report.html`](docs/build-report.html) for current build
+status and known gaps in this layer.
+
 ## Installation
 
 ```
@@ -32,6 +64,28 @@ yarn dev:chrome
 # start a development firefox browser
 yarn dev:firefox
 ```
+
+## Evidence recorder
+
+On top of rrweb session recording, this extension captures a compact,
+AI-readable evidence package for a DEV/staging session: what you did, the
+network requests that resulted, how the UI changed, and heuristic
+API-vs-UI reconciliation findings - see [`docs/build-report.html`](docs/build-report.html)
+for the current build status, what's been live-verified in a real
+browser, and known gaps.
+
+Quick start:
+
+```bash
+yarn doctor        # from the repo root - checks Node/yarn/browser are ready
+yarn ext:build      # builds packages/web-extension/dist/chrome
+```
+
+Then in Chrome: `chrome://extensions` → enable Developer Mode → **Load
+unpacked** → select `packages/web-extension/dist/chrome`. Open your DEV
+app, navigate to the state you want to investigate, click the extension
+icon and **Start Recording**, use the app normally, then **Stop
+Recording** - a `recording-*.zip` lands in your Downloads folder.
 
 ## Sponsors
 

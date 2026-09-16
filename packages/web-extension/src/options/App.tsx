@@ -2,6 +2,7 @@ import { Route, Routes } from 'react-router-dom';
 import SidebarWithHeader from '~/components/SidebarWithHeader';
 import { FiList, FiSettings } from 'react-icons/fi';
 import { Box } from '@chakra-ui/react';
+import NetworkExclusions from './NetworkExclusions';
 
 export default function App() {
   return (
@@ -23,7 +24,7 @@ export default function App() {
     >
       <Box p="10">
         <Routes>
-          <Route path="/" element={<></>} />
+          <Route path="/" element={<NetworkExclusions />} />
         </Routes>
       </Box>
     </SidebarWithHeader>

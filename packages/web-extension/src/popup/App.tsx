@@ -25,11 +25,13 @@ export function App() {
   const [errorMessage, setErrorMessage] = useState('');
   const [startTime, setStartTime] = useState(0);
   const [newSession, setNewSession] = useState<Session | null>(null);
+  const [captureMode, setCaptureMode] = useState<'cdp' | 'fallback' | undefined>(undefined);
 
   useEffect(() => {
     const parseStatusData = (data: LocalData[LocalDataKey.recorderStatus]) => {
-      const { status, startTimestamp, pausedTimestamp } = data;
+      const { status, startTimestamp, pausedTimestamp, captureMode } = data;
       setStatus(status);
+      setCaptureMode(captureMode);
       if (startTimestamp && pausedTimestamp)
         setStartTime(Date.now() - pausedTimestamp + startTimestamp);
       else if (startTimestamp) setStartTime(startTimestamp);
@@ -83,6 +85,13 @@ export function App() {
           startTime={startTime}
           ticking={status === RecorderStatus.RECORDING}
         />
+      )}
+      {status === RecorderStatus.RECORDING && captureMode && (
+        <Text fontSize="xs" color={captureMode === 'cdp' ? 'green.600' : 'orange.600'} textAlign="center">
+          {captureMode === 'cdp'
+            ? 'Full capture (network + screenshots via debugger)'
+            : 'Fallback capture (debugger unavailable - reduced network fidelity)'}
+        </Text>
       )}
       <Flex justify="center" gap="10" mt="5" mb="5">
         {

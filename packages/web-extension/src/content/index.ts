@@ -1,5 +1,8 @@
 import Browser from 'webextension-polyfill';
+import { nanoid } from 'nanoid';
 import {
+  type CaptureDigestResponseMessage,
+  type EvidenceCaptureConfig,
   type LocalData,
   LocalDataKey,
   RecorderStatus,
@@ -25,15 +28,7 @@ void (() => {
     ) => {
       if (event.source !== window) return;
       if (event.data.message === MessageName.RecordScriptReady)
-        window.postMessage(
-          {
-            message: MessageName.StartRecord,
-            config: {
-              recordCrossOriginIframes: true,
-            },
-          },
-          location.origin,
-        );
+        void respondToRecordScriptReady();
     },
   );
   if (isInCrossOriginIFrame()) {
@@ -63,6 +58,31 @@ async function initMainPage() {
         stopResponseCb = undefined;
         resolve(response);
       };
+    });
+  });
+
+  const digestCallbacks = new Map<
+    string,
+    (payload: { digest: unknown; appMapNodes: unknown[] }) => void
+  >();
+  channel.provide(ServiceName.CaptureDigest, () => {
+    const requestId = nanoid();
+    window.postMessage(
+      { message: MessageName.CaptureDigestRequest, requestId },
+      location.origin,
+    );
+    return new Promise((resolve) => {
+      // Bounded wait: if inject.ts isn't running (recording isn't
+      // active, or the page navigated mid-request), never hang the
+      // caller forever.
+      const timeout = setTimeout(() => {
+        digestCallbacks.delete(requestId);
+        resolve(undefined);
+      }, 5000);
+      digestCallbacks.set(requestId, (payload) => {
+        clearTimeout(timeout);
+        resolve(payload);
+      });
     });
   });
 
@@ -96,6 +116,14 @@ async function initMainPage() {
           EventName.ContentScriptEmitEvent,
           (event.data as EmitEventMessage).event,
         );
+      else if (event.data.message === MessageName.CaptureDigestResponse) {
+        const data = event.data as CaptureDigestResponseMessage;
+        const cb = digestCallbacks.get(data.requestId);
+        if (cb) {
+          digestCallbacks.delete(data.requestId);
+          cb({ digest: data.digest, appMapNodes: data.appMapNodes });
+        }
+      }
     },
   );
 
@@ -137,4 +165,29 @@ function startRecord() {
   scriptEl.onload = () => {
     document.documentElement.removeChild(scriptEl);
   };
+}
+
+/**
+ * inject.ts (main world) announces it has loaded and is ready to receive
+ * its start-recording config; this content script (isolated world) reads
+ * the per-session evidence-capture config the background script left in
+ * storage.local (see background/index.ts) and forwards it along with
+ * rrweb's own recordCrossOriginIframes option.
+ */
+async function respondToRecordScriptReady() {
+  const localData = (await Browser.storage.local.get(
+    LocalDataKey.evidenceConfig,
+  )) as LocalData | undefined;
+  const evidenceConfig: EvidenceCaptureConfig =
+    localData?.[LocalDataKey.evidenceConfig] ?? {};
+  window.postMessage(
+    {
+      message: MessageName.StartRecord,
+      config: {
+        recordCrossOriginIframes: true,
+      },
+      evidenceConfig,
+    },
+    location.origin,
+  );
 }

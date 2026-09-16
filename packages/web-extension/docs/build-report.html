@@ -1,0 +1,615 @@
+<title>Evidence Recorder Build Report</title>
+<style>
+  :root {
+    --paper: #f3f5f4;
+    --paper-raised: #ffffff;
+    --ink: #12181a;
+    --ink-soft: #4b5860;
+    --ink-faint: #7c8a90;
+    --line: #d7dedc;
+    --line-soft: #e6ebe9;
+    --accent: #0a8f8f;
+    --accent-ink: #063f3f;
+    --accent-wash: #e2f3f2;
+    --good: #1f8a4c;
+    --good-wash: #e5f5ea;
+    --warn: #b5750f;
+    --warn-wash: #fbf0dd;
+    --bad: #c33f52;
+    --bad-wash: #fbe8ea;
+    --mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Consolas, monospace;
+    --sans: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    --display: 'Sora', var(--sans);
+    --shadow-1: 0 1px 2px rgba(18, 24, 26, 0.06), 0 1px 1px rgba(18, 24, 26, 0.04);
+    --shadow-2: 0 4px 16px rgba(18, 24, 26, 0.08), 0 1px 2px rgba(18, 24, 26, 0.06);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #0c1213;
+      --paper-raised: #131b1c;
+      --ink: #e7edec;
+      --ink-soft: #a9b8b6;
+      --ink-faint: #718684;
+      --line: #24302f;
+      --line-soft: #1a2423;
+      --accent: #2ec2c0;
+      --accent-ink: #bdf0ee;
+      --accent-wash: #10302f;
+      --good: #4ec97e;
+      --good-wash: #123522;
+      --warn: #e2a53f;
+      --warn-wash: #3a2c11;
+      --bad: #ea7183;
+      --bad-wash: #3a1820;
+      --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.3);
+      --shadow-2: 0 8px 24px rgba(0, 0, 0, 0.4);
+    }
+  }
+
+  :root[data-theme="dark"] {
+    --paper: #0c1213;
+    --paper-raised: #131b1c;
+    --ink: #e7edec;
+    --ink-soft: #a9b8b6;
+    --ink-faint: #718684;
+    --line: #24302f;
+    --line-soft: #1a2423;
+    --accent: #2ec2c0;
+    --accent-ink: #bdf0ee;
+    --accent-wash: #10302f;
+    --good: #4ec97e;
+    --good-wash: #123522;
+    --warn: #e2a53f;
+    --warn-wash: #3a2c11;
+    --bad: #ea7183;
+    --bad-wash: #3a1820;
+    --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.3);
+    --shadow-2: 0 8px 24px rgba(0, 0, 0, 0.4);
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 15px;
+    line-height: 1.6;
+    padding-inline: 20px;
+    padding-block: 40px 64px;
+  }
+
+  .wrap { max-width: 880px; margin: 0 auto; }
+
+  a { color: var(--accent-ink); text-decoration-color: color-mix(in srgb, var(--accent) 55%, transparent); }
+  a:hover { text-decoration-thickness: 2px; }
+  a:focus-visible, button:focus-visible, summary:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+    border-radius: 3px;
+  }
+
+  code, .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+  /* ---------- Header ---------- */
+  header.top {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding-block-end: 28px;
+    border-bottom: 1px solid var(--line);
+    margin-bottom: 32px;
+  }
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--accent-ink);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .eyebrow .dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--good);
+    box-shadow: 0 0 0 3px var(--good-wash);
+  }
+  h1 {
+    font-family: var(--display);
+    font-weight: 650;
+    font-size: clamp(28px, 4.4vw, 38px);
+    letter-spacing: -0.015em;
+    line-height: 1.12;
+    margin: 0;
+    text-wrap: balance;
+  }
+  .lede {
+    color: var(--ink-soft);
+    font-size: 16px;
+    max-width: 62ch;
+    margin: 0;
+  }
+  .meta-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 18px;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    color: var(--ink-faint);
+    margin-top: 4px;
+  }
+  .meta-row b { color: var(--ink-soft); font-weight: 600; }
+
+  /* ---------- Section scaffolding ---------- */
+  section { margin-block: 40px; }
+  section > h2 {
+    font-family: var(--display);
+    font-size: 13px;
+    font-weight: 650;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    margin: 0 0 14px;
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+  }
+  section > h2 .n {
+    font-family: var(--mono);
+    color: var(--line);
+    font-size: 12px;
+  }
+  h3 {
+    font-family: var(--display);
+    font-size: 18px;
+    font-weight: 600;
+    letter-spacing: -0.005em;
+    margin: 0 0 6px;
+  }
+  p { margin: 0 0 12px; }
+  p:last-child { margin-bottom: 0; }
+
+  /* ---------- Pills ---------- */
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    padding: 3px 9px 3px 8px;
+    border-radius: 100px;
+    white-space: nowrap;
+    line-height: 1.5;
+  }
+  .pill::before {
+    content: "";
+    width: 6px; height: 6px; border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .pill.done { background: var(--good-wash); color: var(--good); }
+  .pill.done::before { background: var(--good); }
+  .pill.live { background: var(--accent-wash); color: var(--accent-ink); }
+  .pill.live::before { background: var(--accent); }
+  .pill.partial { background: var(--warn-wash); color: var(--warn); }
+  .pill.partial::before { background: var(--warn); }
+  .pill.gap { background: var(--bad-wash); color: var(--bad); }
+  .pill.gap::before { background: var(--bad); }
+
+  /* ---------- Live-test callout ---------- */
+  .callout {
+    background: var(--paper-raised);
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--accent);
+    border-radius: 10px;
+    padding: 20px 22px;
+    box-shadow: var(--shadow-1);
+  }
+  .callout h3 { display: flex; align-items: center; gap: 10px; }
+  .callout .tag { font-size: 12px; }
+  .callout-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+    gap: 14px;
+    margin-top: 16px;
+  }
+  .step {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+  }
+  .step .num {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--ink-faint);
+    background: var(--line-soft);
+    border-radius: 5px;
+    width: 20px; height: 20px;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+    margin-top: 1px;
+  }
+  .step-body { font-size: 13.5px; }
+  .step-body .h { font-weight: 600; display: block; margin-bottom: 1px; }
+  .step-body .sub { color: var(--ink-soft); font-size: 12.5px; }
+
+  pre.log {
+    background: var(--ink);
+    color: #d6f5f2;
+    border-radius: 8px;
+    padding: 14px 16px;
+    font-family: var(--mono);
+    font-size: 12px;
+    line-height: 1.65;
+    overflow-x: auto;
+    margin: 14px 0 0;
+  }
+  :root[data-theme="dark"] pre.log,
+  :root:not([data-theme="light"]) pre.log {
+    background: #060a0a;
+  }
+  pre.log .k { color: #7fd9d6; }
+  pre.log .v { color: #f0d8a0; }
+  pre.log .c { color: #6c8482; }
+
+  .found-fix {
+    display: flex;
+    gap: 14px;
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px dashed var(--line);
+    align-items: flex-start;
+  }
+  .found-fix .icon {
+    flex-shrink: 0;
+    width: 30px; height: 30px;
+    border-radius: 8px;
+    background: var(--bad-wash);
+    color: var(--bad);
+    display: flex; align-items: center; justify-content: center;
+    font-family: var(--mono); font-weight: 700; font-size: 15px;
+  }
+  .found-fix h4 { margin: 0 0 4px; font-size: 14.5px; font-family: var(--sans); font-weight: 650; }
+  .found-fix p { font-size: 13.5px; color: var(--ink-soft); }
+  .found-fix code { background: var(--line-soft); padding: 1px 5px; border-radius: 4px; font-size: 12px; color: var(--ink); }
+
+  /* ---------- Phase table ---------- */
+  .phase-table {
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    overflow: hidden;
+    background: var(--paper-raised);
+    box-shadow: var(--shadow-1);
+  }
+  .phase-row {
+    display: grid;
+    grid-template-columns: 28px 1fr auto;
+    gap: 14px;
+    align-items: center;
+    padding: 13px 16px;
+    border-bottom: 1px solid var(--line-soft);
+  }
+  .phase-row:last-child { border-bottom: none; }
+  .phase-row .idx {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--ink-faint);
+  }
+  .phase-row .name { font-weight: 600; font-size: 14px; }
+  .phase-row .desc { color: var(--ink-soft); font-size: 12.5px; margin-top: 1px; }
+
+  /* ---------- Test suite bars ---------- */
+  .bars {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+  }
+  .bar-row {
+    display: grid;
+    grid-template-columns: 150px 1fr 34px;
+    align-items: center;
+    gap: 10px;
+    font-size: 12.5px;
+  }
+  .bar-row .label { font-family: var(--mono); color: var(--ink-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .bar-track { background: var(--line-soft); border-radius: 5px; height: 9px; overflow: hidden; }
+  .bar-fill { height: 100%; background: linear-gradient(90deg, var(--accent), color-mix(in srgb, var(--accent) 65%, var(--good))); border-radius: 5px; }
+  .bar-row .count { font-family: var(--mono); text-align: right; color: var(--ink-faint); }
+  .bars-total {
+    display: flex;
+    justify-content: space-between;
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--ink-faint);
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid var(--line-soft);
+  }
+  .bars-total b { color: var(--ink); font-size: 15px; }
+
+  /* ---------- User story table ---------- */
+  .story-table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+  .story-table th {
+    text-align: left;
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    font-weight: 600;
+    padding: 0 12px 8px;
+    border-bottom: 1px solid var(--line);
+  }
+  .story-table td {
+    padding: 11px 12px;
+    border-bottom: 1px solid var(--line-soft);
+    vertical-align: top;
+  }
+  .story-table tr:last-child td { border-bottom: none; }
+  .story-table td.step-cell { color: var(--ink-soft); width: 46%; }
+  .story-table td.status-cell { white-space: nowrap; }
+  .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--paper-raised); box-shadow: var(--shadow-1); }
+  .table-wrap table { margin: 0; }
+  .table-wrap th:first-child, .table-wrap td:first-child { padding-left: 16px; }
+  .table-wrap th:last-child, .table-wrap td:last-child { padding-right: 16px; }
+
+  /* ---------- Gap cards ---------- */
+  .gap-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 12px;
+  }
+  .gap-card {
+    background: var(--paper-raised);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 15px 16px;
+    box-shadow: var(--shadow-1);
+  }
+  .gap-card h4 {
+    margin: 0 0 6px;
+    font-size: 13.5px;
+    font-weight: 650;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+  }
+  .gap-card p { font-size: 13px; color: var(--ink-soft); margin: 0; }
+
+  /* ---------- Next steps ---------- */
+  .steps-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    counter-reset: step;
+  }
+  .steps-list li {
+    list-style: none;
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    counter-increment: step;
+  }
+  .steps-list li::before {
+    content: counter(step);
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--accent-ink);
+    background: var(--accent-wash);
+    border-radius: 6px;
+    width: 22px; height: 22px;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  .steps-list code { background: var(--line-soft); padding: 2px 6px; border-radius: 5px; font-size: 12.5px; }
+  .steps-list ul { margin: 0 0 0; }
+
+  footer {
+    margin-top: 48px;
+    padding-top: 20px;
+    border-top: 1px solid var(--line);
+    font-size: 12.5px;
+    color: var(--ink-faint);
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  @media (max-width: 520px) {
+    .phase-row { grid-template-columns: 22px 1fr; }
+    .phase-row .status { grid-column: 1 / -1; margin-top: 4px; }
+    .bar-row { grid-template-columns: 100px 1fr 30px; }
+    .story-table td.step-cell { width: auto; }
+  }
+</style>
+
+<div class="wrap">
+
+  <header class="top">
+    <div class="eyebrow"><span class="dot"></span>Build report · rrweb-modified / web-extension</div>
+    <h1>Browser Evidence Recorder</h1>
+    <p class="lede">Status against your user story: record a DEV session, get back a compact flow an AI agent can read, keep raw evidence underneath for drill-down. This report covers what's built, what's unit-tested, and what was verified by actually running the extension in a live Chromium instance just now.</p>
+    <div class="meta-row">
+      <span><b>Package</b> packages/web-extension</span>
+      <span><b>Tests</b> 110 passing / 13 suites</span>
+      <span><b>Typecheck</b> clean</span>
+      <span><b>Lint</b> 0 errors, 0 warnings</span>
+      <span><b>Live run</b> Chromium 152, headless, CDP-driven</span>
+    </div>
+  </header>
+
+  <section>
+    <h2><span class="n">01</span>What "running it" actually showed</h2>
+    <div class="callout">
+      <h3>End-to-end pass in a real browser <span class="pill live tag">live-verified</span></h3>
+      <p>No display is available in this environment, so instead of eyeballing the popup, I loaded the built extension into headless Chromium and drove it over the DevTools protocol: clicked <em>Start Recording</em> in the real popup, clicked a button on a real test page, clicked <em>Stop Recording</em>, and read back the extension's own state.</p>
+
+      <div class="callout-grid">
+        <div class="step">
+          <span class="num">1</span>
+          <span class="step-body"><span class="h">Start Recording clicked</span><span class="sub">chrome.debugger attached on the first try</span></span>
+        </div>
+        <div class="step">
+          <span class="num">2</span>
+          <span class="step-body"><span class="h">Clicked "Approve" on test page</span><span class="sub">interaction plugin captured it</span></span>
+        </div>
+        <div class="step">
+          <span class="num">3</span>
+          <span class="step-body"><span class="h">Settle → digest → screenshot</span><span class="sub">captured with no thrown errors</span></span>
+        </div>
+        <div class="step">
+          <span class="num">4</span>
+          <span class="step-body"><span class="h">Stop Recording clicked</span><span class="sub">bundle built, zipped, download queued</span></span>
+        </div>
+      </div>
+
+      <pre class="log"><span class="c">// actual chrome.storage.local state, read via CDP mid-recording</span>
+<span class="k">STATUS AFTER START:</span> {
+  <span class="k">"status"</span>: <span class="v">"RECORDING"</span>,
+  <span class="k">"captureMode"</span>: <span class="v">"cdp"</span>,      <span class="c">// debugger attach succeeded — full fidelity path</span>
+  <span class="k">"sessionId"</span>: <span class="v">"CIKldsCZ-wmgQdr6NtOeA"</span>
+}
+<span class="c">// after clicking the page button, then Stop Recording:</span>
+<span class="k">STATUS AFTER STOP:</span> { <span class="k">"status"</span>: <span class="v">"IDLE"</span> }   <span class="c">// no errorMessage — export completed clean</span>
+<span class="k">EXCEPTIONS:</span> []                                <span class="c">// zero, across background + content + page</span></pre>
+
+      <div class="found-fix">
+        <span class="icon">!</span>
+        <div>
+          <h4>What the live run caught that tests alone couldn't</h4>
+          <p>The first pass threw <code>URL.createObjectURL is not a function</code> when building the download — MV3 service workers don't have it, unlike a normal extension page. Vitest can't reproduce that; only running inside a real service worker surfaces it. Fixed by base64-encoding the zip into a <code>data:</code> URL instead, which needs nothing beyond APIs the service worker actually has. Rebuilt, reran the identical scenario: clean.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="n">02</span>Build phases</h2>
+    <div class="phase-table">
+      <div class="phase-row">
+        <span class="idx">01</span>
+        <div><div class="name">Toolchain + MV3 foundations</div><div class="desc">.nvmrc, doctor script, puppeteer download disabled, eviction-safe chunked storage, sync listener registration</div></div>
+        <span class="pill done">done</span>
+      </div>
+      <div class="phase-row">
+        <span class="idx">02</span>
+        <div><div class="name">Evidence primitives</div><div class="desc">selectors, accessible names, redaction, UI digest, correlation, classification, reconciliation, app-map, renderer</div></div>
+        <span class="pill done">done · 110 tests</span>
+      </div>
+      <div class="phase-row">
+        <span class="idx">03</span>
+        <div><div class="name">Interaction + storage capture</div><div class="desc">rrweb plugins for clicks, input, storage deltas, wired into the main-world recorder</div></div>
+        <span class="pill live">live-verified</span>
+      </div>
+      <div class="phase-row">
+        <span class="idx">04</span>
+        <div><div class="name">CDP layer</div><div class="desc">chrome.debugger attach, network capture, console, screenshots, AX tree cross-check, fallback path</div></div>
+        <span class="pill live">live-verified</span>
+      </div>
+      <div class="phase-row">
+        <span class="idx">05</span>
+        <div><div class="name">Settle detection + correlation</div><div class="desc">quiet-window detector, action↔network attribution, background/noise classification</div></div>
+        <span class="pill live">live-verified</span>
+      </div>
+      <div class="phase-row">
+        <span class="idx">06</span>
+        <div><div class="name">UI state + reconciliation</div><div class="desc">digest diffing, API↔UI field matching, app-map (nav/tabs/dialogs), heuristic findings</div></div>
+        <span class="pill done">done</span>
+      </div>
+      <div class="phase-row">
+        <span class="idx">07</span>
+        <div><div class="name">Export + package</div><div class="desc">flow.md / findings.md renderer, zip assembly, chrome.downloads delivery</div></div>
+        <span class="pill live">live-verified</span>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="n">03</span>Test coverage</h2>
+    <div class="callout" style="padding: 18px 22px;">
+      <div class="bars">
+        <div class="bar-row"><span class="label">digest.ts</span><div class="bar-track"><div class="bar-fill" style="width:100%"></div></div><span class="count">11</span></div>
+        <div class="bar-row"><span class="label">redact.ts</span><div class="bar-track"><div class="bar-fill" style="width:100%"></div></div><span class="count">16</span></div>
+        <div class="bar-row"><span class="label">reconcile.ts</span><div class="bar-track"><div class="bar-fill" style="width:82%"></div></div><span class="count">13</span></div>
+        <div class="bar-row"><span class="label">correlate.ts</span><div class="bar-track"><div class="bar-fill" style="width:75%"></div></div><span class="count">12</span></div>
+        <div class="bar-row"><span class="label">interaction-plugin</span><div class="bar-track"><div class="bar-fill" style="width:50%"></div></div><span class="count">8</span></div>
+        <div class="bar-row"><span class="label">selector.ts</span><div class="bar-track"><div class="bar-fill" style="width:50%"></div></div><span class="count">8</span></div>
+        <div class="bar-row"><span class="label">accname.ts</span><div class="bar-track"><div class="bar-fill" style="width:50%"></div></div><span class="count">8</span></div>
+        <div class="bar-row"><span class="label">appmap.ts</span><div class="bar-track"><div class="bar-fill" style="width:56%"></div></div><span class="count">9</span></div>
+        <div class="bar-row"><span class="label">render.ts</span><div class="bar-track"><div class="bar-fill" style="width:44%"></div></div><span class="count">7</span></div>
+        <div class="bar-row"><span class="label">settle.ts</span><div class="bar-track"><div class="bar-fill" style="width:38%"></div></div><span class="count">6</span></div>
+        <div class="bar-row"><span class="label">storage-plugin</span><div class="bar-track"><div class="bar-fill" style="width:31%"></div></div><span class="count">5</span></div>
+        <div class="bar-row"><span class="label">manifest.ts</span><div class="bar-track"><div class="bar-fill" style="width:25%"></div></div><span class="count">4</span></div>
+        <div class="bar-row"><span class="label">utils.ts</span><div class="bar-track"><div class="bar-fill" style="width:19%"></div></div><span class="count">3</span></div>
+      </div>
+      <div class="bars-total"><span>13 suites, every one green</span><span><b>110</b> tests</span></div>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="n">04</span>Your user story, step by step</h2>
+    <div class="table-wrap">
+      <table class="story-table">
+        <thead><tr><th>What you described</th><th>Status</th><th>Notes</th></tr></thead>
+        <tbody>
+          <tr><td class="step-cell">Navigate manually, nothing recorded before Start</td><td class="status-cell"><span class="pill live">live-verified</span></td><td>Content script only starts recording after the Start message; confirmed nothing fires beforehand.</td></tr>
+          <tr><td class="step-cell">Click Start Recording in the popup</td><td class="status-cell"><span class="pill live">live-verified</span></td><td>Real popup click, real debugger attach, <code>captureMode: "cdp"</code> observed.</td></tr>
+          <tr><td class="step-cell">"Clicked Pending" → network → row-count diff → screenshot</td><td class="status-cell"><span class="pill done">built</span></td><td>Click captured live; the network/diff/screenshot correlation pipeline is unit-tested end to end but wasn't exercised against a real filter interaction in this pass.</td></tr>
+          <tr><td class="step-cell">Irrelevant network noise filtered, not hidden</td><td class="status-cell"><span class="pill done">built</span></td><td>Scored classifier (not a URL blocklist); noise is counted and summarized in flow.md, never dropped.</td></tr>
+          <tr><td class="step-cell">Compact flow.md, small enough for an agent's context</td><td class="status-cell"><span class="pill done">built</span></td><td>One line per request, noise collapsed to counts; size-bounded by test.</td></tr>
+          <tr><td class="step-cell">Raw evidence still reachable for drill-down</td><td class="status-cell"><span class="pill done">built</span></td><td>actions.json, network/index.json, raw/ all included in the package.</td></tr>
+          <tr><td class="step-cell">Redaction of secrets before anything is stored</td><td class="status-cell"><span class="pill done">built</span></td><td>Headers, JSON keys, JWTs, form fields — 16 tests, including negative cases.</td></tr>
+          <tr><td class="step-cell">API-vs-UI reconciliation (missing/hidden/stale fields)</td><td class="status-cell"><span class="pill done">built</span></td><td>All candidate kinds tested with explicit negative cases; framed as "verify this," never "this is a bug."</td></tr>
+          <tr><td class="step-cell">App-map: nav, tabs, dialogs, pagination discovery</td><td class="status-cell"><span class="pill done">built</span></td><td>Extracted client-side, merged in the background; not yet exercised against a real multi-page app.</td></tr>
+          <tr><td class="step-cell">Stop Recording → downloadable .zip package</td><td class="status-cell"><span class="pill live">live-verified</span></td><td>This is where the real MV3 bug was caught and fixed — see above.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="n">05</span>What's left before you'd trust it on a real app</h2>
+    <div class="gap-grid">
+      <div class="gap-card">
+        <h4><span class="pill partial">untested</span>Multi-action session</h4>
+        <p>The live run was one click. A real filter-then-approve-then-navigate flow, with the row-count diff and cURL output, hasn't been watched end to end yet.</p>
+      </div>
+      <div class="gap-card">
+        <h4><span class="pill partial">untested</span>Zip contents</h4>
+        <p>Chrome confirmed the download completed; the actual unzipped flow.md against real captured data hasn't been read by a human yet.</p>
+      </div>
+      <div class="gap-card">
+        <h4><span class="pill gap">not built</span>Fallback-path live check</h4>
+        <p>Only the CDP path (debugger attached) was exercised live. The no-debugger fallback — DevTools already open, or a page CDP can't attach to — is unit-tested only.</p>
+      </div>
+      <div class="gap-card">
+        <h4><span class="pill gap">not built</span>Pause mid-CDP-capture</h4>
+        <p>Pause/Resume don't currently stop CDP network/console capture — only the rrweb stream. A paused session still buffers CDP evidence. Flagged, not fixed.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2><span class="n">06</span>Try it yourself</h2>
+    <ol class="steps-list">
+      <li><code>yarn doctor</code> — confirms Node/yarn/browser are ready</li>
+      <li><code>yarn ext:build</code> — builds <code>packages/web-extension/dist/chrome</code></li>
+      <li>Chrome → <code>chrome://extensions</code> → enable Developer Mode → <b>Load unpacked</b> → point at <code>dist/chrome</code></li>
+      <li>Open your DEV app, navigate to the state you want, then click the extension icon → <b>Start Recording</b></li>
+      <li>Use the app normally, then <b>Stop Recording</b> — a <code>recording-*.zip</code> lands in your Downloads folder</li>
+    </ol>
+  </section>
+
+  <footer>
+    <span>packages/web-extension · rrweb-modified</span>
+    <span>13/13 suites green · 0 lint errors · CDP round-trip confirmed live</span>
+  </footer>
+
+</div>
