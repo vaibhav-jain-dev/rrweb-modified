@@ -254,4 +254,8 @@ export type EvidenceBundle = {
   screenshots: ScreenshotRef[];
   appMap: AppMap;
   findings: UiDataFinding[];
+  /** What redaction removed at capture time, counted by reason - so the
+   * package can say what is missing, not only that something is. Absent on
+   * bundles built before the tally was persisted. */
+  redactionReport?: Record<string, number>;
 };

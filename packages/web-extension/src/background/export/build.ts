@@ -22,7 +22,14 @@ import {
   reconcileResponse,
 } from '~/evidence/reconcile';
 import { toCurlScript } from '~/evidence/curl';
-import { renderFindings, renderFlow, renderReadme, renderSummaryJson } from '~/evidence/render';
+import type { RedactionReport } from '~/evidence/redact';
+import {
+  renderFindings,
+  renderFlow,
+  renderManifest,
+  renderReadme,
+  renderSummaryJson,
+} from '~/evidence/render';
 import { emptyAppMap, mergeAppMapNodes, recordNavigationEdge } from '~/evidence/appmap';
 import { serializeDigests } from '~/evidence/digest-export';
 import { serializeNetwork } from '~/evidence/network-export';
@@ -47,6 +54,10 @@ import {
 
 export type SettleResult = {
   actionSeq: number;
+  /** The timestamp of the action this settle belongs to - the exact join
+   * back to it after actions are renumbered at export. Absent on evidence
+   * recorded before it was stored, which falls back to nearest-in-time. */
+  actionT?: number;
   settledAt: number;
   digest: UIDigest;
   diffSummary: string[];
@@ -69,6 +80,13 @@ export async function buildEvidenceBundle(session: EvidenceSession): Promise<Evi
   const consoleEntries = await getEvidenceItems<ConsoleRecord>(session.id, 'console');
   const storageDeltas = await getEvidenceItems<StorageDelta>(session.id, 'storage');
   const settleResults = await getEvidenceItems<SettleResult>(session.id, 'digest');
+  // One tally per stop; summed in case a session was stopped and resumed.
+  const redactionReport: RedactionReport = {};
+  for (const tally of await getEvidenceItems<RedactionReport>(session.id, 'redaction')) {
+    for (const [reason, count] of Object.entries(tally)) {
+      redactionReport[reason] = (redactionReport[reason] ?? 0) + count;
+    }
+  }
 
   // Assign final sequence numbers in timestamp order (content scripts in
   // different frames/tabs interleave only once their events reach here).
@@ -82,6 +100,9 @@ export async function buildEvidenceBundle(session: EvidenceSession): Promise<Evi
     if (originalSeq === undefined) return undefined;
     const original = settleResults.find((s) => s.actionSeq === originalSeq);
     if (!original) return undefined;
+    if (original.actionT !== undefined) {
+      return actions.find((a) => a.t === original.actionT)?.seq;
+    }
     const nearest = actions.reduce((a, b) =>
       Math.abs(b.t - original.settledAt) < Math.abs(a.t - original.settledAt) ? b : a,
     );
@@ -171,12 +192,18 @@ export async function buildEvidenceBundle(session: EvidenceSession): Promise<Evi
     screenshots: dedupedScreenshots,
     appMap,
     findings: dedupedFindings,
+    redactionReport,
   };
 }
 
 /** settleResults are keyed by the *original* live-assigned seq; find the
- * one matching this (now renumbered) action by nearest timestamp. */
-function remapSeqOriginal(action: ActionRecord, settleResults: SettleResult[]): number {
+ * one belonging to this (now renumbered) action. The action's timestamp is
+ * the exact key; only evidence recorded before it was stored falls back to
+ * the nearest settle in time, which can pair rapid actions with one digest. */
+export function remapSeqOriginal(action: ActionRecord, settleResults: SettleResult[]): number {
+  const exact = settleResults.find((s) => s.actionT === action.t);
+  if (exact) return exact.actionSeq;
+  if (settleResults.some((s) => s.actionT !== undefined)) return -1;
   const match = settleResults.find((s) => Math.abs(s.settledAt - action.t) < 20000);
   return match?.actionSeq ?? -1;
 }
@@ -228,6 +255,7 @@ export async function packageBundle(bundle: EvidenceBundle): Promise<Blob> {
     JSON.stringify(serializeDigests(bundle.actions, bundle.digests)),
   );
   files['app-map.json'] = strToU8(JSON.stringify(bundle.appMap, null, 2));
+  files['redaction-report.json'] = strToU8(JSON.stringify(bundle.redactionReport ?? {}, null, 2));
 
   // bundle.screenshots was already deduped in buildEvidenceBundle (repeats
   // pointed at their canonical path); only paths still referenced by some
@@ -240,6 +268,13 @@ export async function packageBundle(bundle: EvidenceBundle): Promise<Blob> {
     if (path.startsWith('screenshots/') && !keptScreenshotPaths.has(path)) continue;
     files[path] = new Uint8Array(await blob.arrayBuffer());
   }
+
+  // Last, because it lists every other file with its size - the screenshots
+  // just added included - so a reader knows what a file costs before opening
+  // it, and which schema version the skill's package-format.md describes.
+  const sizes: Record<string, number> = {};
+  for (const [path, bytes] of Object.entries(files)) sizes[path] = bytes.byteLength;
+  files['manifest.json'] = strToU8(renderManifest(bundle, sizes));
 
   const zipped = zipSync(files, { level: 6 });
   return new Blob([zipped], { type: 'application/zip' });

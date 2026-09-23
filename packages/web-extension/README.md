@@ -87,6 +87,19 @@ app, navigate to the state you want to investigate, click the extension
 icon and **Start Recording**, use the app normally, then **Stop
 Recording** - a `recording-*.zip` lands in your Downloads folder.
 
+### The skill
+
+[`skills/rrweb-evidence-recording/SKILL.md`](skills/rrweb-evidence-recording/SKILL.md)
+is the recorder's own account of itself in the Agent Skills format: when to
+reach for it, how to run it, and how to read a recording cheapest-first, with
+[`references/package-format.md`](skills/rrweb-evidence-recording/references/package-format.md)
+describing every file and field of the zip. Every `recording-*.zip` names the
+skill in its own `README.md` and `manifest.json`, so a package that arrives on
+its own still says what explains it. Point any Agent Skills runtime at the
+directory (for Claude Code, symlink it into `~/.claude/skills/`); a change to
+the export format and the change to its description belong in the same pull
+request.
+
 ## Sponsors
 
 [Become a sponsor](https://opencollective.com/rrweb#sponsor) and get your logo on our README on Github with a link to your site.

@@ -245,7 +245,14 @@ export async function downloadSessions(ids: string[]) {
  * eviction-safety reason as `appendEventChunk`.
  */
 
-export type EvidenceKind = 'action' | 'network' | 'console' | 'storage' | 'digest' | 'screenshot';
+export type EvidenceKind =
+  | 'action'
+  | 'network'
+  | 'console'
+  | 'storage'
+  | 'digest'
+  | 'screenshot'
+  | 'redaction';
 
 const EvidenceDbName = 'evidence';
 const EvidenceChunkStoreName = 'evidence_chunks';

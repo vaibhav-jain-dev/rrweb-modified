@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { renderFlow, renderFindings, renderSummaryJson } from '~/evidence/render';
+import {
+  PACKAGE_SCHEMA_VERSION,
+  SKILL_NAME,
+  renderFlow,
+  renderFindings,
+  renderManifest,
+  renderReadme,
+  renderSummaryJson,
+} from '~/evidence/render';
 import type { EvidenceBundle } from '~/evidence/types';
 
 function bundle(overrides: Partial<EvidenceBundle> = {}): EvidenceBundle {
@@ -203,5 +211,62 @@ describe('renderSummaryJson', () => {
     const parsed = JSON.parse(renderSummaryJson(b)) as unknown[];
     expect(parsed).toHaveLength(1);
     expect(parsed[0]).toMatchObject({ type: 'click', target: 'Approve' });
+  });
+});
+
+describe('the package explains itself', () => {
+  it('points every action at the files that hold its detail, by the join key', () => {
+    const b = bundle({
+      actions: [
+        {
+          seq: 7,
+          t: 0,
+          type: 'click',
+          page: { url: 'https://x/', route: '/', title: '', tabId: 1, frameId: 0 },
+          target: { selector: '.btn', selectorCandidates: [], locator: '', tag: 'BUTTON', attrs: {}, rrwebId: 42 },
+        },
+      ],
+    });
+    const flow = renderFlow(b);
+    expect(flow).toContain(
+      'DRILL-DOWN  actions.json#7 · network/index.json actionSeq=7 · ui-state/digests.json actionSeq=7',
+    );
+    // The raw event stream is not in the package, so nothing may point at it.
+    expect(flow).not.toContain('raw/');
+  });
+
+  it('README names the skill and only files the package actually contains', () => {
+    const readme = renderReadme(bundle());
+    expect(readme).toContain(SKILL_NAME);
+    expect(readme).toContain(`schema ${PACKAGE_SCHEMA_VERSION}`);
+    for (const present of ['manifest.json', 'flow.md', 'findings.md', 'network/index.json', 'redaction-report.json']) {
+      expect(readme).toContain(present);
+    }
+    for (const absent of ['raw/', 'cookies.json']) {
+      expect(readme).not.toContain(absent);
+    }
+  });
+
+  it('manifest lists every file with its size, the schema and the skill', () => {
+    const b = bundle({
+      session: { id: 's1', name: 'n', createTimestamp: 1_700_000_000_000, modifyTimestamp: 1_700_000_060_000, recorderVersion: '0.9', captureMode: 'cdp' },
+      screenshots: [
+        { actionSeq: 0, phase: 'after', path: 'screenshots/action-0000-after.jpg' },
+        { actionSeq: 1, phase: 'after', path: 'screenshots/action-0000-after.jpg', dedupedFrom: 'screenshots/action-0000-after.jpg' },
+      ],
+    });
+    const manifest = JSON.parse(renderManifest(b, { 'network/index.json': 3400, 'flow.md': 12 })) as {
+      schema_version: number;
+      skill: string;
+      recorder_version: string;
+      counts: { screenshots: number };
+      files: { path: string; bytes: number }[];
+    };
+    expect(manifest).toMatchObject({ schema_version: PACKAGE_SCHEMA_VERSION, skill: SKILL_NAME, recorder_version: '0.9' });
+    expect(manifest.counts.screenshots).toBe(1); // a deduped repeat is not a second image
+    expect(manifest.files).toEqual([
+      { path: 'flow.md', bytes: 12 },
+      { path: 'network/index.json', bytes: 3400 },
+    ]);
   });
 });

@@ -170,12 +170,13 @@ export function renderFlow(bundle: EvidenceBundle): string {
       lines.push('');
     }
 
-    if (action.target?.rrwebId !== undefined) {
-      lines.push(
-        `DRILL-DOWN  actions.json#${action.seq} · raw/events.json@rrwebId=${action.target.rrwebId}`,
-      );
-      lines.push('');
-    }
+    // Where the detail for this moment is, by the one key every file shares.
+    // Nothing here names a file the package does not contain: the raw rrweb
+    // event stream is not exported, so an rrwebId is not a pointer to read.
+    lines.push(
+      `DRILL-DOWN  actions.json#${action.seq} · network/index.json actionSeq=${action.seq} · ui-state/digests.json actionSeq=${action.seq}`,
+    );
+    lines.push('');
 
     lines.push('---');
     lines.push('');
@@ -334,47 +335,113 @@ export function renderFindings(bundle: EvidenceBundle): string {
   return lines.join('\n');
 }
 
+/**
+ * The skill that explains this package: the name an agent asks any Agent
+ * Skills runtime for. It lives beside this code in
+ * skills/rrweb-evidence-recording, so the change that alters the export is
+ * the change that alters its description.
+ */
+export const SKILL_NAME = 'rrweb-evidence-recording';
+
+/**
+ * Bumped when a file, a field or a meaning in the package changes in a way a
+ * reader written against the previous shape would get wrong. The skill's
+ * references/package-format.md is written against this number.
+ */
+export const PACKAGE_SCHEMA_VERSION = 1;
+
+/**
+ * The package's own README. Every file it names is a file packageBundle
+ * writes - a README that promises a raw/ directory that is not there sends
+ * an agent looking for it, and the next thing it does is invent what it
+ * would have found.
+ */
 export function renderReadme(bundle: EvidenceBundle): string {
   return [
     `# Evidence package: ${bundle.session.name}`,
     '',
     'This package captures a browser session recorded against an already-running',
-    'web application, with no changes to that application. Start here:',
+    'web application, with no changes to that application. It was written by the',
+    `rrweb evidence recorder - skill \`${SKILL_NAME}\`, package schema ${PACKAGE_SCHEMA_VERSION}.`,
+    "That skill's SKILL.md says how to read this cheapest-first and its",
+    'references/package-format.md describes every file and field. Start here:',
     '',
-    '1. **flow.md** - the compact, human/AI-readable narrative of what the user',
-    '   did, what network activity resulted, and how the UI changed. Read this',
-    '   first; it is small on purpose.',
-    '2. **findings.md** - heuristic UX/data-discovery candidates (missing fields,',
+    '1. **manifest.json** - the schema and recorder version, and every other file',
+    '   in this package with its size, so you know what a read costs before',
+    '   making it.',
+    '2. **flow.md** - the compact narrative: one block per action with what was',
+    '   done, the primary requests, how the UI changed, the screenshot, and where',
+    '   to drill. Read this first; it is small on purpose.',
+    '3. **findings.md** - heuristic UX/data-discovery candidates (missing fields,',
     '   hidden controls, count mismatches, etc). Every entry is a candidate to',
     '   verify, never an asserted bug. Repeats of the same candidate across',
     '   actions are collapsed into one entry with an occurrence count, and each',
     '   rule caps at 20 distinct candidates, so this file stays a bounded size',
     '   regardless of how long the session was.',
-    '3. **actions.json / summary.json** - the same flow as structured data.',
-    '4. **network/** - per-request detail, plus curl.sh with reproducible curl',
-    '   commands for every captured request. Telemetry (Sentry, analytics),',
-    '   CORS preflights, and other non-backend traffic are pre-tiered `noise`',
-    "   by Settings' network-exclusion rules - filter those out first if you",
-    '   only want the app\'s own backend API calls.',
-    '5. **screenshots/** - one image per meaningful action.',
-    '6. **ui-state/** - the structured UI digest captured after each action',
-    '   (tables, controls, visible/hidden text) - the basis for findings.md.',
-    '   An action whose page state exactly matches an earlier one is stored',
-    '   as `{ sameAs: <actionSeq> }` rather than repeated in full.',
-    '7. **console.json / storage.json / cookies.json** - supporting evidence.',
-    '8. **raw/** - the full rrweb event stream and unfiltered network log, for',
-    '   drill-down only; not needed to understand the flow.',
+    '4. **summary.json / actions.json** - the same flow as structured data.',
+    '5. **network/index.json** - every request with headers and bodies, and',
+    '   **network/curl.sh** with a reproducible curl per non-noise request.',
+    '   Telemetry (Sentry, analytics), CORS preflights and other non-backend',
+    "   traffic are pre-tiered `noise` by Settings' network-exclusion rules.",
+    '   This is the largest file: filter it by `actionSeq`, never read it whole.',
+    '6. **ui-state/digests.json** - the structured UI digest captured after each',
+    '   action (tables, controls, visible/hidden text) - the basis for',
+    '   findings.md. An action whose page state exactly matches an earlier one',
+    '   is stored as `{ sameAs: <actionSeq> }` rather than repeated in full.',
+    '7. **screenshots/** - the viewport after each action settled; an unchanged',
+    '   state points at the earlier image instead of repeating it.',
+    '8. **app-map.json / console.json / storage.json** - supporting evidence.',
+    '9. **redaction-report.json** - what was removed before this package was',
+    '   written, counted by reason. Passwords, tokens, auth headers and cookie',
+    '   values never reach disk; a `[REDACTED:<reason>]` marker stands where',
+    '   each one was, and there is no original to ask for.',
+    '',
+    '`actionSeq` is the join key across every file: the same number names the',
+    'same moment in flow.md, actions.json, network/index.json, ui-state/ and',
+    'screenshots/.',
     '',
     'For the lowest-token read: **flow.md + findings.md are enough to understand',
-    'what happened and what to double-check.** Only open network/, screenshots/,',
-    'or raw/ for the specific actionSeq you need to verify - they are drill-down',
-    'detail, not required reading, and are the largest files in this package.',
+    'what happened and what to double-check.** Open network/, ui-state/ or',
+    'screenshots/ only for the specific actionSeq you need to verify - they are',
+    'drill-down detail, not required reading, and the largest files here.',
     '',
-    'Sensitive values (passwords, tokens, auth headers, cookie values) have been',
-    'redacted before this package was written - see redaction-report.json for',
-    'what was removed and why.',
+    'The raw rrweb event stream is not included in this package.',
     '',
   ].join('\n');
+}
+
+/**
+ * manifest.json: what is in the package and what each file costs, written
+ * last so every size is final. It cannot list itself.
+ */
+export function renderManifest(bundle: EvidenceBundle, sizes: Record<string, number>): string {
+  const files = Object.keys(sizes)
+    .sort()
+    .map((path) => ({ path, bytes: sizes[path] }));
+  const screenshots = new Set(bundle.screenshots.map((s) => s.path));
+  return JSON.stringify(
+    {
+      schema_version: PACKAGE_SCHEMA_VERSION,
+      recorder_version: bundle.session.recorderVersion,
+      skill: SKILL_NAME,
+      generated_at: new Date(bundle.session.modifyTimestamp).toISOString(),
+      session: {
+        id: bundle.session.id,
+        name: bundle.session.name,
+        recorded_at: new Date(bundle.session.createTimestamp).toISOString(),
+        capture_mode: bundle.session.captureMode,
+      },
+      counts: {
+        actions: bundle.actions.length,
+        requests: bundle.network.length,
+        findings: bundle.findings.length,
+        screenshots: screenshots.size,
+      },
+      files,
+    },
+    null,
+    2,
+  );
 }
 
 export function renderSummaryJson(bundle: EvidenceBundle): string {

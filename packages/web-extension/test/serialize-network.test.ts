@@ -67,6 +67,37 @@ describe('serializeNetwork', () => {
     expect(out).toEqual([a, b]);
   });
 
+  it('drops the payload of noise-tier and asset requests, keeping the entry itself', () => {
+    const noise = req({
+      requestId: 'n0',
+      url: 'https://sentry.example.test/envelope',
+      tier: 'noise',
+      resourceType: 'Fetch',
+      responseBody: '{"ok":true}',
+      responseHeaders: { 'content-type': 'application/json' },
+      actionSeq: 2,
+    });
+    const script = req({
+      requestId: 's0',
+      url: 'https://app.example.test/_next/static/chunk.js',
+      tier: 'secondary',
+      resourceType: 'Script',
+      responseBody: 'x'.repeat(1000),
+    });
+    const api = req({ requestId: 'a0', tier: 'primary', resourceType: 'Fetch', responseBody: '{"a":1}' });
+    const bare = req({ requestId: 'b0', tier: 'noise', resourceType: 'Image' });
+
+    const out = serializeNetwork([noise, script, api, bare]) as Record<string, unknown>[];
+
+    expect(out[0]).toMatchObject({ requestId: 'n0', tier: 'noise', actionSeq: 2, payloadOmitted: 'noise' });
+    expect(out[0]).not.toHaveProperty('responseBody');
+    expect(out[0]).not.toHaveProperty('responseHeaders');
+    expect(out[1]).toMatchObject({ requestId: 's0', payloadOmitted: 'asset' });
+    expect(out[1]).not.toHaveProperty('responseBody');
+    expect(out[2]).toEqual(api); // the app's own API call keeps everything
+    expect(out[3]).not.toHaveProperty('payloadOmitted'); // nothing was there to omit
+  });
+
   it('points every repeat back to the first occurrence, not the immediately preceding one', () => {
     const first = req({ requestId: 'r0', responseBody: 'x' });
     const second = req({ requestId: 'r1', responseBody: 'x' });

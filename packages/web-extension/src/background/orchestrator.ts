@@ -221,6 +221,10 @@ async function captureSettleEvidence(s: State, actionSeq: number, actionT: numbe
 
   s.buffers.digest.push({
     actionSeq,
+    // The action's own timestamp, so export pairs this digest with exactly
+    // that action rather than the nearest one in time - rapid clicks used
+    // to share one digest and one screenshot that way.
+    actionT,
     settledAt,
     digest: digestPayload.digest,
     diffSummary: diff.summary,
@@ -278,6 +282,11 @@ export async function stopOrchestration(): Promise<EvidenceSession | undefined> 
   if (isAttached(s.tabId)) await detachDebugger(s.tabId);
 
   await flushState(s);
+
+  // The redaction tally lives only in memory until here. Persisting it is
+  // what lets the export say what was removed and why (redaction-report.json)
+  // rather than leaving a reader to guess what a [REDACTED:*] marker cost.
+  await appendEvidenceChunk(s.session.id, 'redaction', 0, [s.redactionReport]);
 
   return { ...s.session, modifyTimestamp: Date.now() };
 }
