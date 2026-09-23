@@ -74,6 +74,42 @@ function looksLikeApiOrigin(url: string, apiOrigins: string[] = []): boolean {
   }
 }
 
+/**
+ * The origins the app's API lives on, read from the traffic: every origin
+ * that answered a fetch/XHR with JSON. Apps rarely serve their API from
+ * the page's origin (an API gateway is the norm), and treating only the
+ * page origin as "the API" ranked icon fetches above the real calls.
+ * Ordered by how many such responses each origin gave, most first.
+ */
+export function inferApiOrigins(requests: NetworkRequest[]): string[] {
+  const counts = new Map<string, number>();
+  for (const req of requests) {
+    const type = req.resourceType?.toLowerCase();
+    if (type !== 'xhr' && type !== 'fetch' && type !== 'xmlhttprequest') continue;
+    // Telemetry answers JSON too. A request already tiered noise, or one to
+    // a known analytics host, is not the app's API whatever it returned.
+    if (req.tier === 'noise') continue;
+    const host = hostOf(req.url);
+    if (host && KNOWN_ANALYTICS_HOST_HINTS.some((h) => host.includes(h))) continue;
+    const contentType = req.responseHeaders?.['content-type'] ?? req.responseHeaders?.['Content-Type'] ?? '';
+    if (!contentType.includes('json')) continue;
+    const origin = safeOriginOf(req.url);
+    if (!origin) continue;
+    counts.set(origin, (counts.get(origin) ?? 0) + 1);
+  }
+  return Array.from(counts.entries())
+    .sort((a, b) => b[1] - a[1])
+    .map(([origin]) => origin);
+}
+
+function safeOriginOf(url: string): string | undefined {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return undefined;
+  }
+}
+
 function responseAppearsInDigest(req: NetworkRequest, digest?: UIDigest): boolean {
   if (!digest || !req.responseBody) return false;
   try {

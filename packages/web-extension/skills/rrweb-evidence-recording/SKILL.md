@@ -61,10 +61,21 @@ block, `actions.json[n]`, the `network/index.json` entries with
 `actionSeq: n`, the `ui-state/digests.json` entry with `actionSeq: n` and
 `screenshots/action-000n-after.jpg` all describe the same moment.
 
+`flow.md` opens with a `SUMMARY` block — page and API origins, the routes
+visited in order, request counts by tier, how many findings, how many values
+were redacted — which is the cheapest answer to "is what I am looking for even
+in here". Routes in `flow.md` and `findings.md` are **templated**: identifiers
+(UUIDs, object ids, long numbers) are replaced by `:id`, so two visits to one
+screen read as one screen. The exact route is in `actions.json`.
+
 ## Rules that keep a reading honest
 
 - Everything in `findings.md` is a **candidate**. Verify it against the
   request in `network/index.json` and the digest before repeating it.
+- Field-level candidates ("returned but never rendered") are grouped **per
+  endpoint** — one entry naming `GET /path/:id` and the JSON paths it
+  concerns — because that is the unit to verify: does this screen render
+  what this call returns. Sixty paths under one endpoint is one question.
 - `tier: noise` means a settings rule excluded the request; `secondary` is
   static assets and same-origin non-API traffic; `primary` is what the app's
   backend was asked. Tiering is heuristic, not a judgement of relevance.
@@ -85,8 +96,9 @@ block, `actions.json[n]`, the `network/index.json` entries with
   stylesheets, images and excluded requests keep their entry (URL, status,
   timing, tier) with `payloadOmitted: "asset" | "noise"`. `network/curl.sh`
   still reproduces every non-noise request in full.
-- Only the page's own origin is treated as the API origin; an API served from
-  another host is tiered by heuristics and may rank below static assets.
+- API origins are inferred from the traffic (every origin that answered a
+  fetch/XHR with JSON) and listed in the `SUMMARY`; a JSON API that the
+  session never called cannot be inferred and its requests tier by heuristics.
 - Recordings made before schema 1 stored no `actionT` on settle results, so
   their digests and screenshots were paired to actions by nearest time and
   rapid actions could share one; on those, trust `digestHash` over the file

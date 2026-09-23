@@ -7,6 +7,7 @@
  * precision that an agent - or a person - can quickly decide whether it's
  * actually a problem, not to decide that itself.
  */
+import { templateEndpoint } from './route-template';
 import type { AppMap, CollectionInfo, NetworkRequest, UIDigest, UiDataFinding } from './types';
 
 const TRIVIAL_KEY_RE = /^(id|_id|uuid|guid|createdAt|updatedAt|timestamp|__typename)$/i;
@@ -109,6 +110,10 @@ export function reconcileResponse(
   } catch {
     return findings;
   }
+  // Every finding from this response names the endpoint it came from, so
+  // findings.md can say "these 62 fields of GET /loan-application/:id/data"
+  // once rather than sixty-two times.
+  const endpoint = templateEndpoint(request.method, request.url);
 
   const uiAtoms = new Set(digest.textAtoms);
   const hiddenAtoms = new Set(digest.hiddenAtoms);
@@ -124,6 +129,7 @@ export function reconcileResponse(
         summary: `Response at ${match.path} had ${match.items.length} items; "${collection.label ?? collection.selector}" rendered ${collection.count}`,
         evidence: {
           route: opts.route,
+          endpoint,
           actionSeq: opts.actionSeq,
           selector: collection.selector,
           jsonPath: match.path,
@@ -146,6 +152,7 @@ export function reconcileResponse(
         summary: `Value at ${atom.path} ("${atom.value}") is present in the DOM but not visible/accessible`,
         evidence: {
           route: opts.route,
+          endpoint,
           actionSeq: opts.actionSeq,
           jsonPath: atom.path,
           screenshotRef: opts.screenshotRef,
@@ -160,6 +167,7 @@ export function reconcileResponse(
       summary: `Value at ${atom.path} ("${atom.value}") does not appear anywhere in the rendered UI`,
       evidence: {
         route: opts.route,
+        endpoint,
         actionSeq: opts.actionSeq,
         jsonPath: atom.path,
         screenshotRef: opts.screenshotRef,
@@ -187,6 +195,7 @@ export function reconcileResponse(
           summary: `UI still shows "${staleCandidate}" while the latest response has "${atom.value}" at ${atom.path}`,
           evidence: {
             route: opts.route,
+            endpoint,
             actionSeq: opts.actionSeq,
             jsonPath: atom.path,
             screenshotRef: opts.screenshotRef,

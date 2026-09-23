@@ -214,6 +214,82 @@ describe('renderSummaryJson', () => {
   });
 });
 
+describe('flow.md stays readable on a real session', () => {
+  it('opens with a summary and templates the ids out of routes', () => {
+    const route =
+      '/home/c/8a3602a6-ce9c-4eef-8f96-343d3b160650/p/68c536780617959688182237/dashboard?viewMode=pipeline&loanId=6a623ce76d236412cfa935c2';
+    const b = bundle({
+      actions: [
+        { seq: 0, t: 0, type: 'click', page: { url: 'https://lms.example.test/login', route: '/login', title: '', tabId: 1, frameId: 0 } },
+        { seq: 1, t: 1, type: 'click', page: { url: 'https://lms.example.test' + route, route, title: '', tabId: 1, frameId: 0 } },
+      ],
+      network: [
+        { requestId: 'r1', method: 'GET', url: 'https://api.example.test/lms/api/v1/loan-application/6a623ce76d236412cfa935c2/data', status: 200, startTime: 0, actionSeq: 1, tier: 'primary', resourceType: 'Fetch', responseHeaders: { 'content-type': 'application/json' } },
+        { requestId: 'r2', method: 'GET', url: 'https://sentry.example.test/envelope', status: 200, startTime: 0, actionSeq: 1, tier: 'noise' },
+      ],
+      redactionReport: { header: 3, jwt: 1 },
+    });
+    const flow = renderFlow(b);
+    expect(flow).toContain('SUMMARY');
+    expect(flow).toContain('page origin:  https://lms.example.test');
+    expect(flow).toContain('api origins:  https://api.example.test');
+    expect(flow).toContain('routes:       /login → /home/c/:id/p/:id/dashboard?viewMode=pipeline&loanId=:id');
+    expect(flow).toContain('requests:     2 (1 primary · 0 secondary · 1 noise)');
+    expect(flow).toContain('redacted:     4 values');
+    expect(flow).toContain('ACTION 1  ·  00:00:00  ·  /home/c/:id/p/:id/dashboard?viewMode=pipeline&loanId=:id');
+    expect(flow).not.toContain('8a3602a6-ce9c-4eef-8f96-343d3b160650');
+  });
+
+  it('names a target briefly, and says when it has no name at all', () => {
+    const page = { url: 'https://x/', route: '/', title: '', tabId: 1, frameId: 0 };
+    const longForm = 'Welcome back Please enter your details to sign in to your account. Email Address Password Forgot Password? Sign In';
+    const b = bundle({
+      actions: [
+        { seq: 0, t: 0, type: 'submit', page, target: { selector: 'form', selectorCandidates: [], locator: 'role=form[name="Sign in"]', tag: 'FORM', accessibleName: longForm, attrs: {} } },
+        { seq: 1, t: 0, type: 'click', page, target: { selector: 'body > div:nth-of-type(3) > div:nth-of-type(1)', selectorCandidates: [], locator: '', tag: 'DIV', attrs: {} } },
+        { seq: 2, t: 0, type: 'click', page, target: { selector: '.btn', selectorCandidates: [], locator: '', tag: 'BUTTON', accessibleName: 'Approve', attrs: {} } },
+      ],
+    });
+    const flow = renderFlow(b);
+    expect(flow).toContain('Submitted "role=form[name="Sign in"]"'); // the short locator beats the long name
+    expect(flow).not.toContain(longForm);
+    expect(flow).toContain('Clicked "unlabelled div body > div:nth-of-type(3) > div:nth-of-type(1)"');
+    expect(flow).toContain('Clicked "Approve"');
+  });
+
+  it('keeps debug console lines out of the flow', () => {
+    const page = { url: 'https://x/', route: '/', title: '', tabId: 1, frameId: 0 };
+    const b = bundle({
+      actions: [{ seq: 0, t: 0, type: 'click', page }],
+      console: [
+        { t: 0, level: 'debug', text: 'render tick', source: 'console', actionSeq: 0 },
+        { t: 0, level: 'error', text: 'TypeError: x is undefined', source: 'exception', actionSeq: 0 },
+      ],
+    });
+    const flow = renderFlow(b);
+    expect(flow).toContain('[error] TypeError');
+    expect(flow).not.toContain('render tick');
+  });
+});
+
+describe('findings group field-level candidates by endpoint', () => {
+  it('prints one candidate per endpoint listing the paths, not one per field', () => {
+    const many = Array.from({ length: 62 }, (_, i) => ({
+      kind: 'missing_in_ui' as const,
+      summary: `Value at $.field${i} ("v${i}") does not appear anywhere in the rendered UI`,
+      evidence: { route: '/home/c/8a3602a6-ce9c-4eef-8f96-343d3b160650/dashboard', actionSeq: 2, jsonPath: `$.field${i}`, endpoint: 'GET /lms/api/v1/loan-application/:id/data' },
+      howToVerify: 'x',
+    }));
+    const findings = renderFindings(bundle({ findings: many }));
+    expect(findings.match(/\*\*Candidate:\*\*/g)?.length).toBe(1);
+    expect(findings).toContain('62 fields of `GET /lms/api/v1/loan-application/:id/data` returned but never rendered (62 raw observations)');
+    expect(findings).toContain('Routes: /home/c/:id/dashboard');
+    expect(findings).toContain('`$.field0`');
+    expect(findings).toContain('… and 22 more');
+    expect(findings).not.toContain('8a3602a6');
+  });
+});
+
 describe('the package explains itself', () => {
   it('points every action at the files that hold its detail, by the join key', () => {
     const b = bundle({

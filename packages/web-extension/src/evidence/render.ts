@@ -13,6 +13,8 @@ import type {
   NetworkRequest,
   UiDataFinding,
 } from './types';
+import { inferApiOrigins } from './classify';
+import { templateRoute } from './route-template';
 
 function shortenUrl(url: string): string {
   try {
@@ -28,9 +30,41 @@ function formatTime(t: number): string {
   return d.toISOString().slice(11, 19);
 }
 
+/** The longest a target name may be in a flow line. A form's accessible
+ * name is often the whole form's text; past this it says nothing a reader
+ * can use, and it costs as much as the rest of the block. */
+const MAX_LABEL = 60;
+
+/**
+ * A short, honest name for what was acted on: the accessible name, the
+ * visible text or the locator when one of them is short enough; otherwise
+ * the shortest of them cut to MAX_LABEL. A target with no name at all is
+ * said to be unlabelled rather than dressed up as a selector.
+ */
+function targetName(action: ActionRecord): string {
+  const target = action.target;
+  if (!target) return '(unlabeled element)';
+  const candidates = [target.accessibleName, target.text, target.locator]
+    .map((c) => (c ?? '').replace(/\s+/g, ' ').trim())
+    .filter((c) => c.length > 0);
+  const fits = candidates.find((c) => c.length <= MAX_LABEL);
+  if (fits) return fits;
+  if (candidates.length > 0) {
+    const shortest = candidates.reduce((a, b) => (a.length <= b.length ? a : b));
+    return `${shortest.slice(0, MAX_LABEL - 1)}…`;
+  }
+  const tag = (target.tag || 'element').toLowerCase();
+  const selector = target.selector ? ` ${truncate(target.selector, 50)}` : '';
+  return `unlabelled ${tag}${selector}`;
+}
+
+function truncate(text: string, max: number): string {
+  return text.length <= max ? text : `${text.slice(0, max - 1)}…`;
+}
+
 function actionLabel(action: ActionRecord): string {
   const target = action.target;
-  const name = target?.accessibleName || target?.text || target?.selector || '(unlabeled element)';
+  const name = targetName(action);
   const value = action.value ?? '';
   switch (action.type) {
     case 'click':
@@ -48,19 +82,19 @@ function actionLabel(action: ActionRecord): string {
     case 'key':
       return `Pressed ${value} on "${name}"`;
     case 'scroll':
-      return `Scrolled "${target ? name : action.page.route}"`;
+      return `Scrolled "${target ? name : templateRoute(action.page.route)}"`;
     case 'navigate':
-      return `Navigated to ${action.page.route}`;
+      return `Navigated to ${templateRoute(action.page.route)}`;
     case 'reload':
-      return `Reloaded ${action.page.route}`;
+      return `Reloaded ${templateRoute(action.page.route)}`;
     case 'back':
-      return `Went back to ${action.page.route}`;
+      return `Went back to ${templateRoute(action.page.route)}`;
     case 'forward':
-      return `Went forward to ${action.page.route}`;
+      return `Went forward to ${templateRoute(action.page.route)}`;
     case 'redirect':
-      return `Redirected to ${action.page.route}`;
+      return `Redirected to ${templateRoute(action.page.route)}`;
     case 'tab-open':
-      return `Opened new tab: ${action.page.route}`;
+      return `Opened new tab: ${templateRoute(action.page.route)}`;
     case 'tab-close':
       return `Closed tab`;
     default:
@@ -91,6 +125,8 @@ export function renderFlow(bundle: EvidenceBundle): string {
     `Recorded ${new Date(bundle.session.createTimestamp).toISOString()} · ${bundle.actions.length} actions · capture mode: ${bundle.session.captureMode}`,
   );
   lines.push('');
+  lines.push(...renderSummary(bundle));
+  lines.push('');
 
   const requestsByAction = new Map<number, NetworkRequest[]>();
   for (const req of bundle.network) {
@@ -115,7 +151,9 @@ export function renderFlow(bundle: EvidenceBundle): string {
   }
 
   bundle.actions.forEach((action, i) => {
-    lines.push(`ACTION ${action.seq}  ·  ${formatTime(action.t)}  ·  ${action.page.route}`);
+    // The route is templated (ids replaced by :id) so a reader sees the
+    // screen, not the visit; the exact route is in actions.json.
+    lines.push(`ACTION ${action.seq}  ·  ${formatTime(action.t)}  ·  ${templateRoute(action.page.route)}`);
     lines.push(actionLabel(action));
     lines.push('');
 
@@ -153,12 +191,15 @@ export function renderFlow(bundle: EvidenceBundle): string {
       lines.push('');
     }
 
-    const consoleEntries = consoleByAction.get(action.seq);
+    // Debug lines dominate a real session (42 of 47 in one recording) and
+    // say nothing about what the user saw; they stay in console.json.
+    const consoleEntries = consoleByAction.get(action.seq)?.filter((c) => c.level !== 'debug');
     if (consoleEntries?.length) {
       lines.push('CONSOLE');
       for (const c of consoleEntries.slice(0, 4)) {
         lines.push(`  [${c.level}] ${c.text.slice(0, 200)}`);
       }
+      if (consoleEntries.length > 4) lines.push(`  … and ${consoleEntries.length - 4} more in console.json`);
       lines.push('');
     }
 
@@ -189,6 +230,52 @@ export function renderFlow(bundle: EvidenceBundle): string {
   }
 
   return lines.join('\n');
+}
+
+/**
+ * The ten-line summary at the top of flow.md: what the session touched,
+ * in the numbers a reader needs before deciding where to look. It is the
+ * cheapest answer to "is the thing I am looking for even in here".
+ */
+function renderSummary(bundle: EvidenceBundle): string[] {
+  const lines: string[] = ['SUMMARY'];
+  const pageOrigin = bundle.actions[0] ? originOf(bundle.actions[0].page.url) : '';
+  if (pageOrigin) lines.push(`  page origin:  ${pageOrigin}`);
+  const apiOrigins = inferApiOrigins(bundle.network).filter((o) => o !== pageOrigin);
+  if (apiOrigins.length) lines.push(`  api origins:  ${apiOrigins.join(', ')}`);
+
+  const routes: string[] = [];
+  for (const action of bundle.actions) {
+    const route = templateRoute(action.page.route);
+    if (routes[routes.length - 1] !== route) routes.push(route);
+  }
+  if (routes.length) {
+    const shown = routes.slice(0, 8).join(' → ');
+    lines.push(`  routes:       ${shown}${routes.length > 8 ? ` → … (${routes.length - 8} more)` : ''}`);
+  }
+
+  const tiers = { primary: 0, secondary: 0, noise: 0 };
+  for (const req of bundle.network) tiers[req.tier ?? 'secondary']++;
+  const failed = bundle.network.filter((r) => r.failed || (r.status !== undefined && r.status >= 400)).length;
+  lines.push(
+    `  requests:     ${bundle.network.length} (${tiers.primary} primary · ${tiers.secondary} secondary · ${tiers.noise} noise)` +
+      (failed ? ` · ${failed} failed or ≥400` : ''),
+  );
+
+  const distinct = new Set(bundle.findings.map(findingGroupKey)).size;
+  lines.push(`  findings:     ${distinct} distinct candidates (${bundle.findings.length} raw) — see findings.md`);
+
+  const redacted = Object.values(bundle.redactionReport ?? {}).reduce((a, b) => a + b, 0);
+  if (redacted) lines.push(`  redacted:     ${redacted} values removed at capture — see redaction-report.json`);
+  return lines;
+}
+
+function originOf(url: string): string {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return '';
+  }
 }
 
 function summarizeUnattributed(network: NetworkRequest[]): string[] {
@@ -232,6 +319,48 @@ function findingHeader(kind: UiDataFinding['kind']): string {
 
 const FINDINGS_PER_KIND_CAP = 20;
 const OCCURRENCES_SHOWN_CAP = 3;
+
+/** The kinds that are one finding per JSON path of one response. */
+const FIELD_LEVEL_KINDS = new Set<UiDataFinding['kind']>(['missing_in_ui', 'hidden_in_ui', 'api_field_no_ui']);
+/** Paths listed per endpoint before "… and N more". */
+const PATHS_PER_ENDPOINT_CAP = 40;
+
+/**
+ * Field-level findings, one block per endpoint: which paths of that
+ * response never reached the page, on which routes, seen how often. One
+ * candidate per endpoint, because that is the unit somebody verifies -
+ * "does this screen render what this call returns" - not one per field.
+ */
+function renderFieldFindingsByEndpoint(kind: UiDataFinding['kind'], groups: UiDataFinding[][]): string[] {
+  const byEndpoint = new Map<string, UiDataFinding[][]>();
+  for (const group of groups) {
+    const endpoint = group[0].evidence.endpoint ?? '';
+    const list = byEndpoint.get(endpoint) ?? [];
+    list.push(group);
+    byEndpoint.set(endpoint, list);
+  }
+  const lines: string[] = [];
+  const what =
+    kind === 'hidden_in_ui'
+      ? 'present in the DOM but not visible'
+      : 'returned but never rendered';
+  for (const [endpoint, endpointGroups] of byEndpoint) {
+    const routes = new Set<string>();
+    let raw = 0;
+    for (const group of endpointGroups) {
+      raw += group.length;
+      for (const f of group) if (f.evidence.route) routes.add(templateRoute(f.evidence.route));
+    }
+    const paths = endpointGroups.map((g) => g[0].evidence.jsonPath ?? '?');
+    lines.push(`- **Candidate:** ${paths.length} field${paths.length === 1 ? '' : 's'} of \`${endpoint}\` ${what} (${raw} raw observation${raw === 1 ? '' : 's'})`);
+    if (routes.size) lines.push(`  Routes: ${Array.from(routes).join(', ')}`);
+    const shown = paths.slice(0, PATHS_PER_ENDPOINT_CAP).map((p) => `\`${p}\``).join(', ');
+    lines.push(`  Paths: ${shown}${paths.length > PATHS_PER_ENDPOINT_CAP ? ` … and ${paths.length - PATHS_PER_ENDPOINT_CAP} more` : ''}`);
+    lines.push(`  Verify: open network/index.json at this endpoint's response and the ui-state digest for the same actionSeq; confirm each path is genuinely absent from the page, and whether it should have a UI representation.`);
+    lines.push('');
+  }
+  return lines;
+}
 
 /** Same field/value tripping the same rule on every action that happens to
  * re-fetch it (e.g. a loan record loaded on every page of a wizard) is the
@@ -302,19 +431,30 @@ export function renderFindings(bundle: EvidenceBundle): string {
     lines.push(`## ${findingHeader(kind)} (${groupList.length} distinct, ${findings.length} raw)`);
     lines.push('');
 
+    // Field-level data findings are one per JSON path, and a single
+    // response can produce eighty of them - one recording had 84 of its 88
+    // candidates under one rule. When the findings carry the endpoint they
+    // came from, they are printed per endpoint as a list of paths rather
+    // than as eighty blocks saying the same thing about different fields.
+    if (FIELD_LEVEL_KINDS.has(kind) && groupList.every((g) => g[0].evidence.endpoint)) {
+      lines.push(...renderFieldFindingsByEndpoint(kind, groupList));
+      continue;
+    }
+
     for (const group of groupList.slice(0, FINDINGS_PER_KIND_CAP)) {
       const f = group[0];
       lines.push(`- **Candidate:** ${f.summary}`);
+      if (f.evidence.route) lines.push(`  Route: ${templateRoute(f.evidence.route)}`);
       if (group.length > 1) {
         lines.push(`  Seen ${group.length} times across actions.`);
       }
       for (const occurrence of group.slice(0, OCCURRENCES_SHOWN_CAP)) {
         const ev = occurrence.evidence;
         const evParts: string[] = [];
-        if (ev.route) evParts.push(`route: ${ev.route}`);
         if (ev.actionSeq !== undefined) evParts.push(`action: ${ev.actionSeq}`);
         if (ev.selector) evParts.push(`selector: \`${ev.selector}\``);
         if (ev.jsonPath) evParts.push(`json path: \`${ev.jsonPath}\``);
+        if (ev.endpoint) evParts.push(`endpoint: ${ev.endpoint}`);
         if (ev.screenshotRef) evParts.push(`screenshot: ${ev.screenshotRef}`);
         if (evParts.length) lines.push(`  Evidence: ${evParts.join(', ')}`);
       }

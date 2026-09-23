@@ -219,6 +219,10 @@ export type UiDataFinding = {
     screenshotRef?: string;
     apiValue?: unknown;
     uiValue?: unknown;
+    /** `METHOD /templated/path` of the response a data finding came from,
+     * so findings.md can group by endpoint rather than list one entry per
+     * field. */
+    endpoint?: string;
   };
   howToVerify: string;
 };

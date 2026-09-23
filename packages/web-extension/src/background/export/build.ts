@@ -12,7 +12,7 @@ import {
   buildActionWindows,
   detectPolling,
 } from '~/evidence/correlate';
-import { classifyAll } from '~/evidence/classify';
+import { classifyAll, inferApiOrigins } from '~/evidence/classify';
 import { RECOMMENDED_NETWORK_EXCLUSIONS } from '~/evidence/network-exclusions';
 import { SyncDataKey, type Settings, type SyncData } from '~/types';
 import {
@@ -117,7 +117,12 @@ export async function buildEvidenceBundle(session: EvidenceSession): Promise<Evi
 
   const pageOrigin = actions[0] ? safeOrigin(actions[0].page.url) : '';
   const excludeRules = await getEnabledNetworkExclusions();
-  const network = classifyAll(attributed, { pageOrigin, apiOrigins: [pageOrigin], excludeRules });
+  // The app's API is usually on another origin than its pages (an API
+  // gateway); treating only the page origin as "the API" ranked icon
+  // fetches above the loan-application calls. Infer the API origins from
+  // the traffic itself.
+  const apiOrigins = [pageOrigin, ...inferApiOrigins(attributed)].filter(Boolean);
+  const network = classifyAll(attributed, { pageOrigin, apiOrigins, excludeRules });
 
   const pollingGroups = detectPolling(network);
   const pollingUrls = new Set(pollingGroups.map((g) => g.url));

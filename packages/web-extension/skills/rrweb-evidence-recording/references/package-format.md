@@ -30,8 +30,16 @@ action is a mirror id, not a pointer into a file.
 ## `flow.md` block
 
 ```
-ACTION <seq>  ·  <HH:MM:SS UTC>  ·  <route>
-<label: Clicked "…" / Typed "…" into "…" / Navigated to … / Submitted "…">
+SUMMARY
+  page origin:  <origin>
+  api origins:  <origins that answered fetch/XHR with JSON>
+  routes:       <templated routes in order, first 8>
+  requests:     <n> (<primary> primary · <secondary> secondary · <noise> noise) · <failed or ≥400>
+  findings:     <distinct> distinct candidates (<raw> raw) — see findings.md
+  redacted:     <n> values removed at capture — see redaction-report.json
+
+ACTION <seq>  ·  <HH:MM:SS UTC>  ·  <templated route>
+<label: Clicked "…" / Typed "…" into "…" / Navigated to … / Submitted "…">   names are ≤60 chars; an unnamed target reads "unlabelled <tag> <selector>"
 
 NETWORK
   <METHOD> <path?query> → <status|FAILED> (<ms>)      up to 8 primary/secondary
@@ -115,11 +123,14 @@ alert|status|dialog|toast, text}]`, `counters {label: number}`, `textAtoms[]`
 not_focusable truncated unreachable_nav hidden_tab incomplete_table
 missing_pagination missing_filter_control api_field_no_ui
 inaccessible_control inconsistent_state`), `summary` (always phrased as a
-candidate), `evidence {route?, actionSeq?, selector?, jsonPath?,
-screenshotRef?, apiValue?, uiValue?}`, `howToVerify`.
+candidate), `evidence {route?, endpoint?, actionSeq?, selector?, jsonPath?,
+screenshotRef?, apiValue?, uiValue?}`, `howToVerify`. `endpoint` is
+`METHOD /templated/path` of the response a data finding came from.
 
-`findings.md` groups by `(kind, jsonPath, summary)` and prints the first three
-occurrences of each group.
+`findings.md` groups by `(kind, jsonPath, summary)`, prints each group's route
+once (templated) and its first three occurrences; the field-level kinds
+(`missing_in_ui`, `hidden_in_ui`, `api_field_no_ui`) are printed per endpoint
+instead — one candidate per endpoint listing up to 40 JSON paths.
 
 ## `ConsoleRecord`, `StorageDelta`, `AppMap`
 
