@@ -1,5 +1,5 @@
 /**
- * Screenshot capture: CDP full-page screenshot when the debugger is
+ * Screenshot capture: CDP viewport screenshot when the debugger is
  * attached, falling back to chrome.tabs.captureVisibleTab (viewport only)
  * otherwise. Downscaled to a max width via OffscreenCanvas, available in
  * MV3 service workers - no extra dependency needed.
@@ -53,7 +53,11 @@ async function captureViaCdp(tabId: number): Promise<Blob | undefined> {
   const result = await sendCommand<{ data: string }>(tabId, 'Page.captureScreenshot', {
     format: 'jpeg',
     quality: Math.round(JPEG_QUALITY * 100),
-    captureBeyondViewport: true,
+    // Never captureBeyondViewport: it makes Chromium resize the live page's
+    // layout viewport while capturing, which left parts of the recorded app
+    // clipped and blank (white) after each action. Viewport only, matching
+    // the captureVisibleTab fallback.
+    captureBeyondViewport: false,
   });
   if (!result?.data) return undefined;
   return base64ToBlob(result.data, 'image/jpeg');
