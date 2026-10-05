@@ -55,7 +55,11 @@ const CDP_PROTOCOL_VERSION = '1.3';
  * varies slightly by Chrome version) degrades that one signal rather than
  * aborting the whole attach.
  */
-const DOMAINS_TO_ENABLE = ['Network', 'Page', 'Runtime', 'Log', 'Accessibility', 'DOM'];
+const DOMAINS_TO_ENABLE = ['Network', 'Runtime', 'Log'];
+// Deliberately NOT enabled: Page (no page events consumed), DOM and
+// Accessibility (getFullAXTree / describeNode work without them, and
+// Accessibility.enable keeps Chrome's AX tree live on every DOM mutation,
+// slowing the recorded app).
 
 export async function attachDebugger(tabId: number): Promise<boolean> {
   installGlobalListeners();
@@ -75,7 +79,25 @@ export async function attachDebugger(tabId: number): Promise<boolean> {
     ),
   );
 
+  await nudgeReflow(tabId);
+
   return true;
+}
+
+/**
+ * The "started debugging this browser" infobar shrinks the viewport; Chromium
+ * sometimes fails to reflow the page afterwards, leaving the app clipped with
+ * a blank remainder. Clearing any emulation override and firing a resize
+ * forces the layout viewport to be recomputed.
+ */
+async function nudgeReflow(tabId: number): Promise<void> {
+  await new Promise((r) => setTimeout(r, 300)); // let the infobar settle
+  await chrome.debugger.sendCommand({ tabId }, 'Emulation.clearDeviceMetricsOverride').catch(() => {});
+  await chrome.debugger
+    .sendCommand({ tabId }, 'Runtime.evaluate', {
+      expression: "window.dispatchEvent(new Event('resize'))",
+    })
+    .catch(() => {});
 }
 
 export async function detachDebugger(tabId: number): Promise<void> {

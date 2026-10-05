@@ -77,9 +77,12 @@ export async function captureScreenshot(
   tabId: number,
   windowId: number,
 ): Promise<{ blob: Blob; usedCdp: boolean } | undefined> {
+  // captureVisibleTab first: it reads the compositor output without touching
+  // the page, whereas Page.captureScreenshot over CDP can leave the tab's
+  // render surface at the wrong size (clipped app, blank white remainder).
+  const tabsBlob = await captureViaTabsApi(windowId);
+  if (tabsBlob) return { blob: await downscale(tabsBlob), usedCdp: false };
   const cdpBlob = await captureViaCdp(tabId);
   if (cdpBlob) return { blob: await downscale(cdpBlob), usedCdp: true };
-  const fallbackBlob = await captureViaTabsApi(windowId);
-  if (fallbackBlob) return { blob: await downscale(fallbackBlob), usedCdp: false };
   return undefined;
 }
