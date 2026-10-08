@@ -2,8 +2,10 @@ import { useState, useEffect } from 'react';
 import Browser from 'webextension-polyfill';
 import {
   Box,
+  Button,
   Flex,
   IconButton,
+  Input,
   Link,
   Spacer,
   Stack,
@@ -12,7 +14,7 @@ import {
 import { FiSettings, FiList, FiPause, FiPlay } from 'react-icons/fi';
 import Channel from '~/utils/channel';
 import { LocalDataKey, RecorderStatus, EventName } from '~/types';
-import type { LocalData, Session } from '~/types';
+import type { LocalData, OpenNote, Session } from '~/types';
 
 import { CircleButton } from '~/components/CircleButton';
 import { Timer } from './Timer';
@@ -25,6 +27,8 @@ export function App() {
   const [errorMessage, setErrorMessage] = useState('');
   const [startTime, setStartTime] = useState(0);
   const [newSession, setNewSession] = useState<Session | null>(null);
+  const [openNotes, setOpenNotes] = useState<OpenNote[]>([]);
+  const [noteText, setNoteText] = useState('');
   const [captureMode, setCaptureMode] = useState<'cdp' | 'fallback' | undefined>(undefined);
 
   useEffect(() => {
@@ -40,7 +44,13 @@ export function App() {
       if (!data || !data[LocalDataKey.recorderStatus]) return;
       parseStatusData((data as LocalData)[LocalDataKey.recorderStatus]);
     });
+    void Browser.storage.local.get(LocalDataKey.openNotes).then((data) => {
+      setOpenNotes(((data as Partial<LocalData>)[LocalDataKey.openNotes]) ?? []);
+    });
     void Browser.storage.local.onChanged.addListener((changes) => {
+      if (changes[LocalDataKey.openNotes]) {
+        setOpenNotes((changes[LocalDataKey.openNotes].newValue as OpenNote[] | undefined) ?? []);
+      }
       if (!changes[LocalDataKey.recorderStatus]) return;
       const data = changes[LocalDataKey.recorderStatus]
         .newValue as LocalData[LocalDataKey.recorderStatus];
@@ -51,6 +61,12 @@ export function App() {
       setNewSession((data as { session: Session }).session);
     });
   }, []);
+
+  const addNote = () => {
+    if (!noteText.trim()) return;
+    void channel.emit(EventName.NoteAdded, { text: noteText });
+    setNoteText('');
+  };
 
   return (
     <Flex direction="column" w={300} padding="5%">
@@ -163,6 +179,37 @@ export function App() {
           </CircleButton>
         )}
       </Flex>
+      {status !== RecorderStatus.IDLE && (
+        <Box mb="4">
+          <Flex gap="2">
+            <Input
+              size="sm"
+              value={noteText}
+              placeholder={openNotes.length ? 'Add a sub-note…' : 'What are you doing now?'}
+              onChange={(e) => setNoteText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') addNote();
+              }}
+            />
+            <Button size="sm" onClick={addNote} isDisabled={!noteText.trim()}>
+              Add
+            </Button>
+          </Flex>
+          {openNotes.map((n) => (
+            <Flex key={n.id} align="center" gap="2" mt="2" pl={`${n.depth * 0.75}rem`}>
+              <Text fontSize="xs" flex="1" noOfLines={2} title={n.text}>
+                {n.text}
+              </Text>
+              <Button
+                size="xs"
+                onClick={() => void channel.emit(EventName.NoteDone, { id: n.id })}
+              >
+                Done
+              </Button>
+            </Flex>
+          ))}
+        </Box>
+      )}
       {newSession && (
         <Text>
           <Text as="b">New Session: </Text>

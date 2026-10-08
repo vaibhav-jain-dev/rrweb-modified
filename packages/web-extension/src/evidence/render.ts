@@ -11,10 +11,12 @@ import type {
   ActionRecord,
   EvidenceBundle,
   NetworkRequest,
+  NoteSpan,
   UiDataFinding,
 } from './types';
 import { inferApiOrigins } from './classify';
 import { templateRoute } from './route-template';
+import { describeActionRange } from './notes';
 
 function shortenUrl(url: string): string {
   try {
@@ -104,6 +106,43 @@ function actionLabel(action: ActionRecord): string {
   }
 }
 
+
+/**
+ * The recorder's comments live inline, in the flow, where they apply - one
+ * place, nothing to cross-reference. A note opens before the first action at
+ * or after it, carrying its text, time range and the actions it covers; it
+ * closes after the last action inside it. Nesting shows as indentation.
+ */
+function noteStartLines(notes: NoteSpan[], emitted: Set<string>, upTo: number): string[] {
+  const lines: string[] = [];
+  for (const n of notes) {
+    if (emitted.has(`s:${n.id}`) || n.startedAt > upTo) continue;
+    emitted.add(`s:${n.id}`);
+    const end = n.closed ? formatTime(n.endedAt) : `${formatTime(n.endedAt)}, never marked done - ended with the recording`;
+    lines.push(`${noteIndent(n)}NOTE ▶ ${n.text}`);
+    lines.push(`${noteIndent(n)}  (recorder's comment, ${formatTime(n.startedAt)} → ${end} · ${describeActionRange(n)})`);
+  }
+  if (lines.length) lines.push('');
+  return lines;
+}
+
+function noteEndLines(notes: NoteSpan[], emitted: Set<string>, nextActionT: number | undefined): string[] {
+  const lines: string[] = [];
+  // Innermost first, so nested notes close in the order they were opened.
+  for (const n of [...notes].reverse()) {
+    if (emitted.has(`e:${n.id}`) || !emitted.has(`s:${n.id}`)) continue;
+    if (nextActionT !== undefined && n.endedAt >= nextActionT) continue;
+    emitted.add(`e:${n.id}`);
+    lines.push(`${noteIndent(n)}NOTE ■ ${n.closed ? 'done' : 'still open'}: ${truncate(n.text, 40)}`);
+  }
+  if (lines.length) lines.push('');
+  return lines;
+}
+
+function noteIndent(span: NoteSpan): string {
+  return '  '.repeat(span.depth);
+}
+
 function renderNetworkLine(req: NetworkRequest): string {
   const status = req.failed ? 'FAILED' : (req.status ?? '?');
   const duration = req.duration !== undefined ? ` (${Math.round(req.duration)}ms)` : '';
@@ -124,9 +163,16 @@ export function renderFlow(bundle: EvidenceBundle): string {
   lines.push(
     `Recorded ${new Date(bundle.session.createTimestamp).toISOString()} · ${bundle.actions.length} actions · capture mode: ${bundle.session.captureMode}`,
   );
+  // Said once here, not under every action: for a 50-action session the
+  // per-action version was a quarter of the file saying the same thing.
+  lines.push(
+    'Detail for any ACTION n: actions.json[n] · network/index.json entries with actionSeq=n · ui-state/digests.json actionSeq=n · screenshots/action-000n-after.jpg',
+  );
   lines.push('');
   lines.push(...renderSummary(bundle));
   lines.push('');
+  const notes = bundle.notes ?? [];
+  const emittedNotes = new Set<string>();
 
   const requestsByAction = new Map<number, NetworkRequest[]>();
   for (const req of bundle.network) {
@@ -151,6 +197,7 @@ export function renderFlow(bundle: EvidenceBundle): string {
   }
 
   bundle.actions.forEach((action, i) => {
+    lines.push(...noteStartLines(notes, emittedNotes, action.t));
     // The route is templated (ids replaced by :id) so a reader sees the
     // screen, not the visit; the exact route is in actions.json.
     lines.push(`ACTION ${action.seq}  ·  ${formatTime(action.t)}  ·  ${templateRoute(action.page.route)}`);
@@ -211,17 +258,13 @@ export function renderFlow(bundle: EvidenceBundle): string {
       lines.push('');
     }
 
-    // Where the detail for this moment is, by the one key every file shares.
-    // Nothing here names a file the package does not contain: the raw rrweb
-    // event stream is not exported, so an rrwebId is not a pointer to read.
-    lines.push(
-      `DRILL-DOWN  actions.json#${action.seq} · network/index.json actionSeq=${action.seq} · ui-state/digests.json actionSeq=${action.seq}`,
-    );
-    lines.push('');
-
     lines.push('---');
     lines.push('');
+    lines.push(...noteEndLines(notes, emittedNotes, bundle.actions[i + 1]?.t));
   });
+  // Notes that opened after the last action, or covered no action at all.
+  lines.push(...noteStartLines(notes, emittedNotes, Number.POSITIVE_INFINITY));
+  lines.push(...noteEndLines(notes, emittedNotes, undefined));
 
   const polling = summarizeUnattributed(bundle.network);
   if (polling.length) {
@@ -344,6 +387,11 @@ function renderFieldFindingsByEndpoint(kind: UiDataFinding['kind'], groups: UiDa
     kind === 'hidden_in_ui'
       ? 'present in the DOM but not visible'
       : 'returned but never rendered';
+  // One instruction for the section, not one per endpoint.
+  lines.push(
+    "Verify each: that endpoint's response in network/index.json against the ui-state digest for the same actionSeq - is the path really absent from the page, and should it be shown?",
+  );
+  lines.push('');
   for (const [endpoint, endpointGroups] of byEndpoint) {
     const routes = new Set<string>();
     let raw = 0;
@@ -356,7 +404,6 @@ function renderFieldFindingsByEndpoint(kind: UiDataFinding['kind'], groups: UiDa
     if (routes.size) lines.push(`  Routes: ${Array.from(routes).join(', ')}`);
     const shown = paths.slice(0, PATHS_PER_ENDPOINT_CAP).map((p) => `\`${p}\``).join(', ');
     lines.push(`  Paths: ${shown}${paths.length > PATHS_PER_ENDPOINT_CAP ? ` … and ${paths.length - PATHS_PER_ENDPOINT_CAP} more` : ''}`);
-    lines.push(`  Verify: open network/index.json at this endpoint's response and the ui-state digest for the same actionSeq; confirm each path is genuinely absent from the page, and whether it should have a UI representation.`);
     lines.push('');
   }
   return lines;
@@ -387,10 +434,7 @@ export function renderFindings(bundle: EvidenceBundle): string {
   lines.push('# UX / data-discovery candidates');
   lines.push('');
   lines.push(
-    'Everything below is a **candidate** for an AI agent or reviewer to verify, not an assertion of a bug. ' +
-      'Each entry states the rule that fired, the evidence, and how to check it. Findings repeating across ' +
-      'multiple actions (the same field re-observed on every page load, say) are collapsed into one entry ' +
-      'with an occurrence count, not listed once per action.',
+    'Candidates to verify, never asserted bugs. A candidate repeating across actions is one entry with a count; each rule shows at most 20.',
   );
   lines.push('');
 
@@ -488,66 +532,58 @@ export const SKILL_NAME = 'rrweb-evidence-recording';
  * reader written against the previous shape would get wrong. The skill's
  * references/package-format.md is written against this number.
  */
-export const PACKAGE_SCHEMA_VERSION = 1;
+export const PACKAGE_SCHEMA_VERSION = 2;
 
 /**
- * The package's own README. Every file it names is a file packageBundle
- * writes - a README that promises a raw/ directory that is not there sends
- * an agent looking for it, and the next thing it does is invent what it
- * would have found.
+ * The package's own README: the entry point, so it carries what a reader
+ * needs to decide where to go next - counts, whether the recorder left
+ * comments, and what the big files cost - in about fifteen lines. Every
+ * file it names is a file packageBundle writes - a README that promises a
+ * raw/ directory that is not there sends an agent looking for it, and the
+ * next thing it does is invent what it would have found. `sizes` holds the
+ * byte sizes of the files written so far (everything but this file and
+ * manifest.json).
  */
-export function renderReadme(bundle: EvidenceBundle): string {
+export function renderReadme(bundle: EvidenceBundle, sizes: Record<string, number> = {}): string {
+  const size = (path: string) => (sizes[path] !== undefined ? ` (${formatBytes(sizes[path])})` : '');
+  const primary = bundle.network.filter((r) => r.tier === 'primary').length;
+  const screenshots = new Set(bundle.screenshots.map((s) => s.path)).size;
+  const notes = bundle.notes?.length ?? 0;
+  const counts = [
+    `Recorded ${new Date(bundle.session.createTimestamp).toISOString()}`,
+    `${bundle.actions.length} actions`,
+    `${bundle.network.length} requests (${primary} primary)`,
+    `${bundle.findings.length} findings`,
+    `${screenshots} screenshots`,
+    ...(notes ? [`${notes} recorder comment${notes === 1 ? '' : 's'}`] : []),
+  ].join(' · ');
+  const notesHint = notes
+    ? " Its `NOTE ▶` lines are the person's own comments on what they were doing - the intent behind the actions they cover; read them as such."
+    : '';
   return [
     `# Evidence package: ${bundle.session.name}`,
     '',
-    'This package captures a browser session recorded against an already-running',
-    'web application, with no changes to that application. It was written by the',
-    `rrweb evidence recorder - skill \`${SKILL_NAME}\`, package schema ${PACKAGE_SCHEMA_VERSION}.`,
-    "That skill's SKILL.md says how to read this cheapest-first and its",
-    'references/package-format.md describes every file and field. Start here:',
+    counts,
+    `Written by the rrweb evidence recorder - skill \`${SKILL_NAME}\`, package schema ${PACKAGE_SCHEMA_VERSION}.`,
+    "That skill's SKILL.md says how to read this; its references/package-format.md has every field.",
     '',
-    '1. **manifest.json** - the schema and recorder version, and every other file',
-    '   in this package with its size, so you know what a read costs before',
-    '   making it.',
-    '2. **flow.md** - the compact narrative: one block per action with what was',
-    '   done, the primary requests, how the UI changed, the screenshot, and where',
-    '   to drill. Read this first; it is small on purpose.',
-    '3. **findings.md** - heuristic UX/data-discovery candidates (missing fields,',
-    '   hidden controls, count mismatches, etc). Every entry is a candidate to',
-    '   verify, never an asserted bug. Repeats of the same candidate across',
-    '   actions are collapsed into one entry with an occurrence count, and each',
-    '   rule caps at 20 distinct candidates, so this file stays a bounded size',
-    '   regardless of how long the session was.',
-    '4. **summary.json / actions.json** - the same flow as structured data.',
-    '5. **network/index.json** - every request with headers and bodies, and',
-    '   **network/curl.sh** with a reproducible curl per non-noise request.',
-    '   Telemetry (Sentry, analytics), CORS preflights and other non-backend',
-    "   traffic are pre-tiered `noise` by Settings' network-exclusion rules.",
-    '   This is the largest file: filter it by `actionSeq`, never read it whole.',
-    '6. **ui-state/digests.json** - the structured UI digest captured after each',
-    '   action (tables, controls, visible/hidden text) - the basis for',
-    '   findings.md. An action whose page state exactly matches an earlier one',
-    '   is stored as `{ sameAs: <actionSeq> }` rather than repeated in full.',
-    '7. **screenshots/** - the viewport after each action settled; an unchanged',
-    '   state points at the earlier image instead of repeating it.',
-    '8. **app-map.json / console.json / storage.json** - supporting evidence.',
-    '9. **redaction-report.json** - what was removed before this package was',
-    '   written, counted by reason. Passwords, tokens, auth headers and cookie',
-    '   values never reach disk; a `[REDACTED:<reason>]` marker stands where',
-    '   each one was, and there is no original to ask for.',
+    'Read in this order and stop as soon as the question is answered:',
     '',
-    '`actionSeq` is the join key across every file: the same number names the',
-    'same moment in flow.md, actions.json, network/index.json, ui-state/ and',
-    'screenshots/.',
+    `1. **flow.md**${size('flow.md')} - a SUMMARY, then one block per action: what was done, the requests it caused, how the UI changed, the screenshot.${notesHint}`,
+    `2. **findings.md**${size('findings.md')} - heuristic API-vs-UI candidates to verify, never asserted bugs. Only when the question is about data not shown, hidden controls or counts.`,
+    `3. Drill-down for one actionSeq only, never read whole: actions.json[n] · network/index.json${size('network/index.json')} filtered to actionSeq=n · network/curl.sh (a reproducible curl per request) · ui-state/digests.json${size('ui-state/digests.json')} filtered to actionSeq=n · screenshots/action-000n-after.jpg · console.json · storage.json · app-map.json.`,
     '',
-    'For the lowest-token read: **flow.md + findings.md are enough to understand',
-    'what happened and what to double-check.** Open network/, ui-state/ or',
-    'screenshots/ only for the specific actionSeq you need to verify - they are',
-    'drill-down detail, not required reading, and the largest files here.',
-    '',
-    'The raw rrweb event stream is not included in this package.',
+    '`actionSeq` is the join key: the same n names the same moment in every file.',
+    '`[REDACTED:<reason>]` marks a value removed at capture, counted in redaction-report.json; there is no original to ask for.',
+    'manifest.json lists every file with its byte size. The raw rrweb event stream is not included.',
     '',
   ].join('\n');
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes >= 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+  if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${bytes} B`;
 }
 
 /**
@@ -575,6 +611,7 @@ export function renderManifest(bundle: EvidenceBundle, sizes: Record<string, num
         actions: bundle.actions.length,
         requests: bundle.network.length,
         findings: bundle.findings.length,
+        notes: bundle.notes?.length ?? 0,
         screenshots: screenshots.size,
       },
       files,
@@ -582,23 +619,4 @@ export function renderManifest(bundle: EvidenceBundle, sizes: Record<string, num
     null,
     2,
   );
-}
-
-export function renderSummaryJson(bundle: EvidenceBundle): string {
-  const summary = bundle.actions.map((action) => {
-    const requests = bundle.network.filter((r) => r.actionSeq === action.seq);
-    return {
-      seq: action.seq,
-      t: action.t,
-      type: action.type,
-      route: action.page.route,
-      target: action.target?.accessibleName ?? action.target?.text ?? action.target?.selector,
-      network: requests.map((r) => ({
-        method: r.method,
-        url: shortenUrl(r.url),
-        status: r.status,
-      })),
-    };
-  });
-  return JSON.stringify(summary, null, 2);
 }

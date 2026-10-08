@@ -4,7 +4,7 @@ description: Records a DEV/staging browser session — every user action, the ne
 license: MIT
 metadata:
   author: rrweb-modified
-  version: "1"
+  version: "2"
   produces: "recording-*.zip"
   entry: README.md
   links: "tech:rrweb, tech:chrome-devtools-protocol, concept:evidence-recording, concept:session-replay"
@@ -48,18 +48,22 @@ extension's own scripts); leave the recommended defaults on.
 
 | step | file | ~size | answers |
 | --- | --- | ---: | --- |
-| 0 | `manifest.json` | 1 KB | schema version, recorder version, every file with its byte size |
-| 1 | `README.md` | 2 KB | this ladder, as the recorder itself wrote it |
-| 2 | `flow.md` | 5–10 KB | one block per action: what was done, the primary requests, the UI diff, the screenshot, where to drill |
-| 3 | `findings.md` | 5–15 KB | candidates to verify, grouped by rule — never asserted bugs |
-| 4 | `summary.json` | 5 KB | flow.md as data: one entry per action with its requests |
-| 5 | `network/index.json` | MBs | full requests and responses — find the `actionSeq`, then the `requestId`; **never read it whole** |
-| 6 | `ui-state/digests.json`, `app-map.json`, `console.json`, `storage.json`, `screenshots/` | | drill-down for one action |
+| 1 | `README.md` | 1 KB | counts, schema version, whether the recorder left comments, and the byte size of each file below |
+| 2 | `flow.md` | 5–10 KB | one block per action: what was done, the primary requests, the UI diff, the screenshot |
+| 3 | `findings.md` | 5–15 KB | candidates to verify, grouped by rule — never asserted bugs; only when the question is about data not shown, hidden controls or counts |
+| 4 | `network/index.json` | MBs | full requests and responses — find the `actionSeq`, then the `requestId`; **never read it whole** |
+| 5 | `ui-state/digests.json`, `app-map.json`, `console.json`, `storage.json`, `screenshots/` | | drill-down for one action |
+| – | `manifest.json` | 1 KB | every file with its byte size — only to price a drill-down file the README did not size |
+
+Stop at the first step that answers the question; most do at step 2.
+
+**`NOTE ▶` lines in `flow.md` are the recorder's own comments**, placed where they apply with the actions they cover: the person's stated intent for that stretch.
 
 **`actionSeq` is the join key across every file.** `flow.md`'s `ACTION n`
 block, `actions.json[n]`, the `network/index.json` entries with
 `actionSeq: n`, the `ui-state/digests.json` entry with `actionSeq: n` and
-`screenshots/action-000n-after.jpg` all describe the same moment.
+`screenshots/action-000n-after.jpg` all describe the same moment; `flow.md`'s
+header says so once, in place of a pointer under every action.
 
 `flow.md` opens with a `SUMMARY` block — page and API origins, the routes
 visited in order, request counts by tier, how many findings, how many values

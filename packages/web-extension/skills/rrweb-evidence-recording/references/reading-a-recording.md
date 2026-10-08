@@ -4,12 +4,15 @@ The recording is evidence, not a verdict. The job is to find the one moment
 the report is about, read everything the package holds about that moment, and
 say what the evidence supports — separately from what it does not.
 
-## 1. Orient (≈3 KB)
+## 1. Orient (≈2 KB)
 
-1. `manifest.json` — how many actions and requests, which files are large.
-2. `README.md` — confirm the schema version matches what this skill describes.
-3. `flow.md` — skim the `ACTION` headers only: the routes visited and the
-   labels. Note the `actionSeq` values around the step the report describes.
+1. `README.md` — the schema version this skill describes, how many actions
+   and requests, which files are large, and whether the recorder left
+   comments.
+2. `flow.md` — the `NOTE ▶` comments if there are any (the recorder's own
+   account of what they were doing), then skim the `ACTION` headers only:
+   the routes visited and the labels. Note the `actionSeq` values around the
+   step the report describes.
 
 Stop here if the report is about a route the session never visited: say so.
 
@@ -67,5 +70,5 @@ digest is not observed; it stays a candidate.
 ## What to write up
 
 Route, `actionSeq`, request path and status, the observed/candidate split,
-and the recorder version from `manifest.json`. A screenshot path is a pointer
+and the recorder version from `README.md` or `manifest.json`. A screenshot path is a pointer
 a reader can open; an image pasted into prose is a cost with no join key.

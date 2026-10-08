@@ -28,9 +28,9 @@ import {
   renderFlow,
   renderManifest,
   renderReadme,
-  renderSummaryJson,
 } from '~/evidence/render';
 import { emptyAppMap, mergeAppMapNodes, recordNavigationEdge } from '~/evidence/appmap';
+import { foldNotes } from '~/evidence/notes';
 import { serializeDigests } from '~/evidence/digest-export';
 import { serializeNetwork } from '~/evidence/network-export';
 import { dedupeScreenshotRefs, remapFindingScreenshotRefs } from '~/evidence/screenshot-export';
@@ -41,6 +41,7 @@ import type {
   EvidenceBundle,
   EvidenceSession,
   NetworkRequest,
+  NoteEvent,
   ScreenshotRef,
   StorageDelta,
   UIDigest,
@@ -80,6 +81,7 @@ export async function buildEvidenceBundle(session: EvidenceSession): Promise<Evi
   const consoleEntries = await getEvidenceItems<ConsoleRecord>(session.id, 'console');
   const storageDeltas = await getEvidenceItems<StorageDelta>(session.id, 'storage');
   const settleResults = await getEvidenceItems<SettleResult>(session.id, 'digest');
+  const noteEvents = await getEvidenceItems<NoteEvent>(session.id, 'note');
   // One tally per stop; summed in case a session was stopped and resumed.
   const redactionReport: RedactionReport = {};
   for (const tally of await getEvidenceItems<RedactionReport>(session.id, 'redaction')) {
@@ -186,6 +188,8 @@ export async function buildEvidenceBundle(session: EvidenceSession): Promise<Evi
   const dedupedScreenshots = dedupeScreenshotRefs(screenshots);
   const dedupedFindings = remapFindingScreenshotRefs(findings, screenshots, dedupedScreenshots);
 
+  const notes = foldNotes(noteEvents, actions, Math.max(session.modifyTimestamp, ...noteEvents.map((e) => e.t)));
+
   return {
     session,
     actions,
@@ -198,6 +202,7 @@ export async function buildEvidenceBundle(session: EvidenceSession): Promise<Evi
     appMap,
     findings: dedupedFindings,
     redactionReport,
+    notes: notes.length ? notes : undefined,
   };
 }
 
@@ -232,10 +237,8 @@ function safeOrigin(url: string): string {
 export async function packageBundle(bundle: EvidenceBundle): Promise<Blob> {
   const files: Record<string, Uint8Array> = {};
 
-  files['README.md'] = strToU8(renderReadme(bundle));
   files['flow.md'] = strToU8(renderFlow(bundle));
   files['findings.md'] = strToU8(renderFindings(bundle));
-  files['summary.json'] = strToU8(renderSummaryJson(bundle));
   // actions.json / network/index.json / ui-state/digests.json are drill-down
   // detail (see README - "not needed to understand the flow"), so they're
   // written compact rather than pretty-printed: nobody reads these by eye,
@@ -274,11 +277,14 @@ export async function packageBundle(bundle: EvidenceBundle): Promise<Blob> {
     files[path] = new Uint8Array(await blob.arrayBuffer());
   }
 
-  // Last, because it lists every other file with its size - the screenshots
-  // just added included - so a reader knows what a file costs before opening
-  // it, and which schema version the skill's package-format.md describes.
+  // README and manifest come last because both quote file sizes - the
+  // README for the few files a reader decides between, the manifest for
+  // every file - and the screenshots just added count. The manifest also
+  // sizes the README; it cannot size itself.
   const sizes: Record<string, number> = {};
   for (const [path, bytes] of Object.entries(files)) sizes[path] = bytes.byteLength;
+  files['README.md'] = strToU8(renderReadme(bundle, sizes));
+  sizes['README.md'] = files['README.md'].byteLength;
   files['manifest.json'] = strToU8(renderManifest(bundle, sizes));
 
   const zipped = zipSync(files, { level: 6 });

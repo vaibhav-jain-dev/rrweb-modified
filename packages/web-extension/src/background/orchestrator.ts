@@ -7,9 +7,10 @@
  * module rather than implementing any of it inline.
  */
 import { nanoid } from 'nanoid';
+import Browser from 'webextension-polyfill';
 import { EventType, IncrementalSource, type eventWithTime } from '@rrweb/types';
 import type Channel from '~/utils/channel';
-import { ServiceName } from '~/types';
+import { LocalDataKey, ServiceName } from '~/types';
 import { attachDebugger, detachDebugger, isAttached } from './cdp/attach';
 import { attachNetworkCapture } from './cdp/network';
 import { attachConsoleCapture } from './cdp/console';
@@ -47,6 +48,10 @@ type State = {
   settleTracker: SettleTracker;
   actionSeqCounter: number;
   lastDigest?: UIDigest;
+  /** AX cross-check for `lastDigest`, reused while the UI is unchanged. */
+  lastAxIgnoredSelectors: string[];
+  /** Tail of the settle-capture chain; captures run one at a time. */
+  captureChain: Promise<void>;
   redactionReport: RedactionReport;
   buffers: {
     action: ActionRecord[];
@@ -89,6 +94,8 @@ export async function startOrchestration(
     cdpAttached,
     settleTracker,
     actionSeqCounter: 0,
+    lastAxIgnoredSelectors: [],
+    captureChain: Promise.resolve(),
     redactionReport: {},
     buffers: { action: [], network: [], console: [], storage: [], digest: [] },
     seqCounters: { action: 0, network: 0, console: 0, storage: 0, digest: 0 },
@@ -122,6 +129,8 @@ export async function startOrchestration(
   }
 
   state.flushTimer = setInterval(() => void flush(), FLUSH_INTERVAL_MS);
+  // A new recording starts with no open notes (see background/notes.ts).
+  await Browser.storage.local.set({ [LocalDataKey.openNotes]: [] }).catch(() => undefined);
 
   return session;
 }
@@ -191,8 +200,24 @@ function maybeEagerFlush(s: State) {
 }
 
 async function captureSettleEvidence(s: State, actionSeq: number, actionT: number) {
-  const { settledAt } = await s.settleTracker.waitForSettle(actionT);
+  const { settledAt, superseded } = await s.settleTracker.waitForSettle(actionT);
 
+  // Captures for a burst of actions (rapid clicks, typing, scrolling) would
+  // otherwise all start at once - each superseded wait resolves the instant
+  // the next action arrives. Running them one at a time keeps the AX dump
+  // and screenshot work from piling up on the recorded page.
+  const run = s.captureChain.then(() => captureSettled(s, actionSeq, actionT, settledAt, superseded));
+  s.captureChain = run.catch(() => undefined);
+  await run;
+}
+
+async function captureSettled(
+  s: State,
+  actionSeq: number,
+  actionT: number,
+  settledAt: number,
+  superseded: boolean,
+) {
   const digestPayload = channelRef
     ? ((await channelRef
         .requestToTab(s.tabId, ServiceName.CaptureDigest, {})
@@ -200,23 +225,31 @@ async function captureSettleEvidence(s: State, actionSeq: number, actionT: numbe
     : undefined;
   if (!digestPayload?.digest) return;
 
+  const uiChanged = s.lastDigest?.digestHash !== digestPayload.digest.digestHash;
   const diff = diffDigests(s.lastDigest, digestPayload.digest);
   s.lastDigest = digestPayload.digest;
 
-  let axIgnoredSelectors: string[] = [];
+  let axIgnoredSelectors = s.lastAxIgnoredSelectors;
   let screenshotPath: string | undefined;
 
-  if (s.cdpAttached) {
-    axIgnoredSelectors = Array.from(await captureAxIgnoredSelectors(s.tabId));
-  }
+  // A superseded action was interrupted mid-transition by the next one, which
+  // gets its own AX check and screenshot once things settle; capturing here
+  // too is just extra work on the page for an in-between frame. The cheap,
+  // read-only digest above is still kept so every action has one.
+  if (!superseded) {
+    // Accessibility.getFullAXTree makes Chrome build the whole AX tree on the
+    // page's main thread, so only redo it when the UI actually changed.
+    if (s.cdpAttached && uiChanged) {
+      axIgnoredSelectors = Array.from(await captureAxIgnoredSelectors(s.tabId));
+      s.lastAxIgnoredSelectors = axIgnoredSelectors;
+    }
 
-  // captureScreenshot tries CDP first and falls back to
-  // chrome.tabs.captureVisibleTab internally - no branch needed here.
-  const shot = await captureScreenshot(s.tabId, s.windowId);
-  if (shot) {
-    const path = `screenshots/action-${String(actionSeq).padStart(4, '0')}-after.jpg`;
-    await putEvidenceBlob(s.session.id, `${s.session.id}/${path}`, shot.blob);
-    screenshotPath = path;
+    const shot = await captureScreenshot(s.tabId, s.windowId);
+    if (shot) {
+      const path = `screenshots/action-${String(actionSeq).padStart(4, '0')}-after.jpg`;
+      await putEvidenceBlob(s.session.id, `${s.session.id}/${path}`, shot);
+      screenshotPath = path;
+    }
   }
 
   s.buffers.digest.push({
@@ -282,6 +315,9 @@ export async function stopOrchestration(): Promise<EvidenceSession | undefined> 
   if (isAttached(s.tabId)) await detachDebugger(s.tabId);
 
   await flushState(s);
+  // Notes still open stay open in the export (flagged as such); only the
+  // popup's list is cleared. Their events were written as they happened.
+  await Browser.storage.local.set({ [LocalDataKey.openNotes]: [] }).catch(() => undefined);
 
   // The redaction tally lives only in memory until here. Persisting it is
   // what lets the export say what was removed and why (redaction-report.json)

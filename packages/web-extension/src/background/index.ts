@@ -30,6 +30,7 @@ import {
   startOrchestration,
   stopOrchestration,
 } from './orchestrator';
+import { addNote, doneNote } from './notes';
 import { buildEvidenceBundle, cleanupSessionEvidence, packageBundle } from './export/build';
 import { RECOMMENDED_NETWORK_EXCLUSIONS } from '~/evidence/network-exclusions';
 
@@ -170,6 +171,50 @@ void (async () => {
   }
 })();
 
+const START_RECORD_TIMEOUT_MS = 10000;
+
+/**
+ * Ask the tab's content script to start rrweb. Chrome and Edge don't inject
+ * a reloaded extension's content scripts into tabs that were already open,
+ * so a tab opened before the last reload has nothing listening and every
+ * Start failed with "Receiving end does not exist". Inject it then and retry
+ * once. Bounded, so a page that never answers can't leave Start stuck.
+ */
+async function requestStartRecord(tabId: number): Promise<RecordStartedMessage> {
+  const request = () =>
+    channel.requestToTab(tabId, ServiceName.StartRecord, {}) as Promise<RecordStartedMessage>;
+  const attempt = request().catch(async (error: Error) => {
+    if (!/Receiving end does not exist|Could not establish connection/i.test(error.message))
+      throw error;
+    await injectContentScript(tabId);
+    return request();
+  });
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error('The page did not respond. Refresh the tab and press Start again.')),
+      START_RECORD_TIMEOUT_MS,
+    );
+  });
+  try {
+    return await Promise.race([attempt, timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function injectContentScript(tabId: number) {
+  if (Browser.scripting) {
+    await Browser.scripting.executeScript({
+      target: { tabId, allFrames: true },
+      files: ['content/index.js'],
+    });
+  } else {
+    // MV2 (Firefox build) has no chrome.scripting
+    await Browser.tabs.executeScript(tabId, { file: '/content/index.js', allFrames: true });
+  }
+}
+
 channel.on(EventName.StartButtonClicked, async () => {
   // Set synchronously, before any `await` below, so a second
   // StartButtonClicked message that arrives while this one is still in
@@ -202,8 +247,7 @@ channel.on(EventName.StartButtonClicked, async () => {
       },
     });
 
-    const res = (await channel
-      .requestToTab(tabId, ServiceName.StartRecord, {})
+    const res = (await requestStartRecord(tabId)
       .catch(async (error: Error) => {
         await stopOrchestration().catch(() => undefined);
         await setRecorderStatus({
@@ -324,8 +368,7 @@ channel.on(EventName.ResumeButtonClicked, async () => {
   const { startTimestamp, pausedTimestamp } = recorderStatus;
   const pausedTime = pausedTimestamp ? Date.now() - pausedTimestamp : 0;
 
-  const startResponse = (await channel
-    .requestToTab(tabId, ServiceName.StartRecord, {})
+  const startResponse = (await requestStartRecord(tabId)
     .catch(async (e: { message: string }) => {
       await setRecorderStatus({ ...recorderStatus, errorMessage: e.message });
     })) as RecordStartedMessage | undefined;
@@ -339,6 +382,24 @@ channel.on(EventName.ResumeButtonClicked, async () => {
     startTimestamp: (startTimestamp ?? Date.now()) + pausedTime,
     pausedTimestamp: undefined,
   });
+});
+
+// Notes are written straight to storage rather than through the
+// orchestrator's in-memory state, so a service worker restart mid-recording
+// loses none of them. `recorderStatus` is rehydrated on worker start.
+const isRecordingNow = () =>
+  recorderStatus.status === RecorderStatus.RECORDING ||
+  recorderStatus.status === RecorderStatus.PAUSED ||
+  recorderStatus.status === RecorderStatus.PausedSwitch;
+
+channel.on(EventName.NoteAdded, (data) => {
+  if (!isRecordingNow() || !recorderStatus.sessionId) return;
+  void addNote(recorderStatus.sessionId, (data as { text?: string }).text ?? '');
+});
+
+channel.on(EventName.NoteDone, (data) => {
+  if (!isRecordingNow() || !recorderStatus.sessionId) return;
+  void doneNote(recorderStatus.sessionId, (data as { id?: string } | undefined)?.id);
 });
 
 channel.on(EventName.ContentScriptEmitEvent, (data) => {

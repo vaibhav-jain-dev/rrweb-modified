@@ -77,8 +77,9 @@ describe('createSettleTracker', () => {
     const second = tracker.waitForSettle(Date.now());
     const firstResult = await first;
     expect(firstResult.timedOut).toBe(true);
+    expect(firstResult.superseded).toBe(true);
     await vi.advanceTimersByTimeAsync(500);
-    await second;
+    expect((await second).superseded).toBe(false);
     tracker.dispose();
   });
 });

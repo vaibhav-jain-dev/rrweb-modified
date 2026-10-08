@@ -25,6 +25,13 @@ const DEFAULTS: Required<SettleOptions> = {
   pollMs: 50,
 };
 
+export type SettleOutcome = {
+  settledAt: number;
+  timedOut: boolean;
+  /** A newer action started before this one settled. */
+  superseded: boolean;
+};
+
 export type SettleTracker = {
   /** Call whenever a network request starts. */
   noteNetworkActivity(): void;
@@ -38,9 +45,10 @@ export type SettleTracker = {
    * timestamp and whether it hit the max-wait bound instead of genuinely
    * quieting down. Only one wait can be in flight; starting a new one
    * before the previous resolves cancels the previous one's timer (its
-   * promise still resolves, at the moment of cancellation).
+   * promise still resolves, at the moment of cancellation, with
+   * `superseded: true`).
    */
-  waitForSettle(actionStart: number): Promise<{ settledAt: number; timedOut: boolean }>;
+  waitForSettle(actionStart: number): Promise<SettleOutcome>;
   dispose(): void;
 };
 
@@ -56,7 +64,7 @@ export function createSettleTracker(options: SettleOptions = {}): SettleTracker 
   let lastMutationAt = Date.now();
   let inFlight = 0;
   let currentPoll: ReturnType<typeof setInterval> | undefined;
-  let currentResolve: ((v: { settledAt: number; timedOut: boolean }) => void) | undefined;
+  let currentResolve: ((v: SettleOutcome) => void) | undefined;
 
   function clearCurrent() {
     if (currentPoll !== undefined) clearInterval(currentPoll);
@@ -84,9 +92,9 @@ export function createSettleTracker(options: SettleOptions = {}): SettleTracker 
       if (currentResolve) {
         const resolve = currentResolve;
         clearCurrent();
-        resolve({ settledAt: Date.now(), timedOut: true });
+        resolve({ settledAt: Date.now(), timedOut: true, superseded: true });
       }
-      return new Promise<{ settledAt: number; timedOut: boolean }>((resolve) => {
+      return new Promise<SettleOutcome>((resolve) => {
         currentResolve = resolve;
         currentPoll = setInterval(() => {
           const now = Date.now();
@@ -97,12 +105,12 @@ export function createSettleTracker(options: SettleOptions = {}): SettleTracker 
             inFlight === 0;
           if (elapsed >= opts.minWaitMs && quiet) {
             clearCurrent();
-            resolve({ settledAt: now, timedOut: false });
+            resolve({ settledAt: now, timedOut: false, superseded: false });
             return;
           }
           if (elapsed >= opts.maxWaitMs) {
             clearCurrent();
-            resolve({ settledAt: now, timedOut: true });
+            resolve({ settledAt: now, timedOut: true, superseded: false });
           }
         }, opts.pollMs);
       });

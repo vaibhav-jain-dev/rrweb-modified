@@ -235,6 +235,32 @@ export type ScreenshotRef = {
   dedupedFrom?: string;
 };
 
+/**
+ * What the person recording typed while recording, as raw start/done events
+ * (the form it is persisted in). A note opens when it is added and closes
+ * when marked done; a note added while another is open is its child.
+ */
+export type NoteEvent =
+  | { kind: 'start'; id: string; parentId?: string; text: string; t: number }
+  | { kind: 'done'; id: string; t: number };
+
+/** A note after export-time folding: its time range and the actions inside it. */
+export type NoteSpan = {
+  id: string;
+  parentId?: string;
+  depth: number;
+  text: string;
+  startedAt: number;
+  /** When marked done, or the recording's end if it never was. */
+  endedAt: number;
+  /** false = still open when the recording stopped, so its end is a guess. */
+  closed: boolean;
+  /** First/last action whose timestamp falls inside [startedAt, endedAt];
+   * absent when the note covered no action. */
+  firstActionSeq?: number;
+  lastActionSeq?: number;
+};
+
 export type EvidenceSession = {
   id: string;
   name: string;
@@ -262,4 +288,6 @@ export type EvidenceBundle = {
    * package can say what is missing, not only that something is. Absent on
    * bundles built before the tally was persisted. */
   redactionReport?: Record<string, number>;
+  /** The recorder's own comments, in start order. Absent when none were made. */
+  notes?: NoteSpan[];
 };

@@ -6,7 +6,6 @@ import {
   renderFindings,
   renderManifest,
   renderReadme,
-  renderSummaryJson,
 } from '~/evidence/render';
 import type { EvidenceBundle } from '~/evidence/types';
 
@@ -192,28 +191,6 @@ describe('renderFindings', () => {
   });
 });
 
-describe('renderSummaryJson', () => {
-  it('produces valid JSON with one compact entry per action', () => {
-    const b = bundle({
-      actions: [
-        {
-          seq: 1,
-          t: 0,
-          type: 'click',
-          page: { url: 'https://x/', route: '/applications', title: '', tabId: 1, frameId: 0 },
-          target: { selector: '.btn', selectorCandidates: [], locator: '', tag: 'BUTTON', accessibleName: 'Approve', attrs: {} },
-        },
-      ],
-      network: [
-        { requestId: 'r1', method: 'POST', url: 'https://x/api/applications/1/approve', status: 200, startTime: 0, actionSeq: 1 },
-      ],
-    });
-    const parsed = JSON.parse(renderSummaryJson(b)) as unknown[];
-    expect(parsed).toHaveLength(1);
-    expect(parsed[0]).toMatchObject({ type: 'click', target: 'Approve' });
-  });
-});
-
 describe('flow.md stays readable on a real session', () => {
   it('opens with a summary and templates the ids out of routes', () => {
     const route =
@@ -304,9 +281,9 @@ describe('the package explains itself', () => {
       ],
     });
     const flow = renderFlow(b);
-    expect(flow).toContain(
-      'DRILL-DOWN  actions.json#7 · network/index.json actionSeq=7 · ui-state/digests.json actionSeq=7',
-    );
+    // Once, in the header - not repeated under every action.
+    expect(flow).toContain('Detail for any ACTION n: actions.json[n] · network/index.json entries with actionSeq=n');
+    expect(flow).not.toContain('DRILL-DOWN');
     // The raw event stream is not in the package, so nothing may point at it.
     expect(flow).not.toContain('raw/');
   });
@@ -318,9 +295,20 @@ describe('the package explains itself', () => {
     for (const present of ['manifest.json', 'flow.md', 'findings.md', 'network/index.json', 'redaction-report.json']) {
       expect(readme).toContain(present);
     }
-    for (const absent of ['raw/', 'cookies.json']) {
+    for (const absent of ['raw/', 'cookies.json', 'summary.json']) {
       expect(readme).not.toContain(absent);
     }
+  });
+
+  it('README quotes the sizes it was given and the counts a reader decides by', () => {
+    const readme = renderReadme(
+      bundle({ network: [{ requestId: 'r', method: 'GET', url: 'https://x/a', startTime: 0, tier: 'primary' }] }),
+      { 'flow.md': 8 * 1024, 'network/index.json': 3 * 1024 * 1024 },
+    );
+    expect(readme).toContain('**flow.md** (8 KB)');
+    expect(readme).toContain('network/index.json (3.0 MB)');
+    expect(readme).toContain('1 requests (1 primary)');
+    expect(readme.split('\n').length).toBeLessThan(20);
   });
 
   it('manifest lists every file with its size, the schema and the skill', () => {

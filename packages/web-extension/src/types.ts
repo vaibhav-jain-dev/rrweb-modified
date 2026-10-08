@@ -32,6 +32,7 @@ export type Settings = {
 export enum LocalDataKey {
   recorderStatus = 'recorder_status',
   evidenceConfig = 'evidence_config',
+  openNotes = 'open_notes',
 }
 
 export type LocalData = {
@@ -59,7 +60,13 @@ export type LocalData = {
   // area, not a direct message) so every frame's inject.ts gets the same
   // capture configuration for this session.
   [LocalDataKey.evidenceConfig]: EvidenceCaptureConfig;
+  // Notes added during the current recording that are not yet marked done,
+  // outermost first. Mirrored here by the background script so the popup,
+  // which is destroyed whenever it loses focus, can show them again.
+  [LocalDataKey.openNotes]: OpenNote[];
 };
+
+export type OpenNote = { id: string; text: string; startedAt: number; depth: number };
 
 export enum RecorderStatus {
   IDLE = 'IDLE',
@@ -93,6 +100,8 @@ export enum EventName {
   StopButtonClicked = 'stop-recording-button-clicked',
   PauseButtonClicked = 'pause-recording-button-clicked',
   ResumeButtonClicked = 'resume-recording-button-clicked',
+  NoteAdded = 'note-added',
+  NoteDone = 'note-done',
 }
 
 // all message names for postMessage API

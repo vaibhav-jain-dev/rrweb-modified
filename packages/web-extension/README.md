@@ -20,7 +20,7 @@ Additional features beyond stock rrweb:
   rrweb event stream, not just DOM mutations.
 - **Structured evidence export** - Start/Stop Recording produces a
   `recording-*.zip` containing a human/AI-readable `flow.md` narrative,
-  `actions.json`/`summary.json`, per-request `curl.sh` reproductions,
+  `actions.json`, per-request `curl.sh` reproductions,
   screenshots, and a UI-state digest, in addition to the raw rrweb events.
 - **Heuristic API-vs-UI reconciliation** (`findings.md`) - flags candidate
   gaps such as an API field with no on-page representation, for a reviewer

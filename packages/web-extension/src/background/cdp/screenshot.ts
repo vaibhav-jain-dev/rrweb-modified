@@ -1,11 +1,16 @@
 /**
- * Screenshot capture: CDP viewport screenshot when the debugger is
- * attached, falling back to chrome.tabs.captureVisibleTab (viewport only)
- * otherwise. Downscaled to a max width via OffscreenCanvas, available in
- * MV3 service workers - no extra dependency needed.
+ * Screenshot capture via chrome.tabs.captureVisibleTab (viewport only).
+ * Downscaled to a max width via OffscreenCanvas, available in MV3 service
+ * workers - no extra dependency needed.
+ *
+ * There is deliberately no CDP Page.captureScreenshot fallback: on a live,
+ * visible tab it disturbs the page's render surface (the app visibly blinks,
+ * or is left clipped with a blank remainder). captureVisibleTab only reads
+ * the compositor output. Its catch is a quota - Chrome rejects more than
+ * MAX_CAPTURE_VISIBLE_TAB_CALLS_PER_SECOND (2) calls per second - so calls
+ * are serialized and spaced out here instead of failing over to CDP.
  */
 import Browser from 'webextension-polyfill';
-import { sendCommand } from './attach';
 
 const MAX_WIDTH = 1280;
 const JPEG_QUALITY = 0.7;
@@ -42,30 +47,12 @@ async function downscale(blob: Blob): Promise<Blob> {
   }
 }
 
-function base64ToBlob(base64: string, mimeType: string): Blob {
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  return new Blob([bytes], { type: mimeType });
-}
-
-async function captureViaCdp(tabId: number): Promise<Blob | undefined> {
-  const result = await sendCommand<{ data: string }>(tabId, 'Page.captureScreenshot', {
-    format: 'jpeg',
-    quality: Math.round(JPEG_QUALITY * 100),
-    // Never captureBeyondViewport: it makes Chromium resize the live page's
-    // layout viewport while capturing, which left parts of the recorded app
-    // clipped and blank (white) after each action. Viewport only, matching
-    // the captureVisibleTab fallback.
-    captureBeyondViewport: false,
-  });
-  if (!result?.data) return undefined;
-  return base64ToBlob(result.data, 'image/jpeg');
-}
-
 async function captureViaTabsApi(windowId: number): Promise<Blob | undefined> {
   try {
-    const dataUrl = await Browser.tabs.captureVisibleTab(windowId, { format: 'png' });
+    const dataUrl = await Browser.tabs.captureVisibleTab(windowId, {
+      format: 'jpeg',
+      quality: Math.round(JPEG_QUALITY * 100),
+    });
     const res = await fetch(dataUrl);
     return await res.blob();
   } catch {
@@ -73,16 +60,28 @@ async function captureViaTabsApi(windowId: number): Promise<Blob | undefined> {
   }
 }
 
-export async function captureScreenshot(
-  tabId: number,
-  windowId: number,
-): Promise<{ blob: Blob; usedCdp: boolean } | undefined> {
-  // captureVisibleTab first: it reads the compositor output without touching
-  // the page, whereas Page.captureScreenshot over CDP can leave the tab's
-  // render surface at the wrong size (clipped app, blank white remainder).
-  const tabsBlob = await captureViaTabsApi(windowId);
-  if (tabsBlob) return { blob: await downscale(tabsBlob), usedCdp: false };
-  const cdpBlob = await captureViaCdp(tabId);
-  if (cdpBlob) return { blob: await downscale(cdpBlob), usedCdp: true };
-  return undefined;
+// Chrome allows 2 captureVisibleTab calls per second; leave some headroom.
+const MIN_CAPTURE_INTERVAL_MS = 600;
+let lastCaptureAt = 0;
+let captureQueue: Promise<unknown> = Promise.resolve();
+
+/**
+ * Returns undefined (no screenshot) rather than capturing something else
+ * when the recorded tab isn't the one showing in its window:
+ * captureVisibleTab captures whatever tab is visible, so after the user
+ * switches tabs it would silently file the wrong page as evidence.
+ */
+export function captureScreenshot(tabId: number, windowId: number): Promise<Blob | undefined> {
+  const run = async () => {
+    const wait = lastCaptureAt + MIN_CAPTURE_INTERVAL_MS - Date.now();
+    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+    const tab = await Browser.tabs.get(tabId).catch(() => undefined);
+    if (!tab?.active || tab.windowId !== windowId) return undefined;
+    lastCaptureAt = Date.now();
+    const blob = await captureViaTabsApi(windowId);
+    return blob ? await downscale(blob) : undefined;
+  };
+  const result = captureQueue.then(run, run);
+  captureQueue = result.catch(() => undefined);
+  return result;
 }

@@ -252,7 +252,8 @@ export type EvidenceKind =
   | 'storage'
   | 'digest'
   | 'screenshot'
-  | 'redaction';
+  | 'redaction'
+  | 'note';
 
 const EvidenceDbName = 'evidence';
 const EvidenceChunkStoreName = 'evidence_chunks';
