@@ -1,0 +1,23 @@
+{
+  "name": "@rrweb/replay-mcp",
+  "private": true,
+  "version": "0.1.0",
+  "description": "MCP server that replays a recording-*.zip in a visible browser, with a patch of changes, and reports only where the run diverged",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "start": "node src/main.ts",
+    "replay": "node src/cli.ts",
+    "check-types": "tsc -noEmit",
+    "test": "vitest run"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12",
+    "fflate": "^0.8",
+    "playwright": "1.61.1",
+    "zod": "^3"
+  }
+}

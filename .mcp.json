@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "rrweb-replay": {
+      "command": "node",
+      "args": ["packages/replay-mcp/src/main.ts"]
+    }
+  }
+}
