@@ -4,6 +4,7 @@
  * the visible window and later runs find the session already there.
  */
 import type { Page } from 'playwright';
+import { getSecret } from './secrets.ts';
 import type { Step } from './types.ts';
 
 const LOGIN_RE = /^\/(login|signin|sign-in)\b/;
@@ -35,7 +36,7 @@ export async function prepareAuth(page: Page, steps: Step[], log: (m: string) =>
     for (const s of login) s.skip = 'already signed in (browser session)';
     return 'already-signed-in';
   }
-  if (process.env.REPLAY_SECRET_PASSWORD) return 'steps-will-sign-in';
+  if (getSecret('PASSWORD')) return 'steps-will-sign-in';
   log('Not signed in. Sign in once in the open browser window; the run continues by itself.');
   const deadline = Date.now() + manualLoginWaitMs();
   while (onLoginPage(page)) {

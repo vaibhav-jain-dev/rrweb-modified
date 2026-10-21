@@ -21,6 +21,7 @@ const { values, positionals } = parseArgs({
     slow: { type: 'string' },
     list: { type: 'boolean' },
     continue: { type: 'boolean' },
+    'keep-open': { type: 'boolean' },
   },
 });
 const zip = positionals[0];
@@ -43,5 +44,9 @@ if (values.list) process.exit(0);
 const slow = nums(values.slow) as [number, number] | undefined;
 const out = await svc.run({ patch, reuse: values.reuse, save: values.save, slow, continueOnDiverge: values.continue, log: (m) => console.error(`  ${m}`) });
 console.log(`\n${out}`);
+if (values['keep-open']) {
+  console.error('\nWindow left open; close it to exit.');
+  await svc.waitUntilClosed();
+}
 await svc.close();
 process.exit(out.startsWith('ok') ? 0 : 1);

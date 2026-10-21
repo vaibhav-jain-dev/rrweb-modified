@@ -1,6 +1,8 @@
-import { mkdirSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { createRequire } from 'node:module';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { build } from 'esbuild';
 import { chromium } from 'playwright';
 import type { BrowserContext, Page } from 'playwright';
@@ -10,6 +12,7 @@ import { prepareAuth } from './auth.ts';
 import { compareStep } from './compare.ts';
 import { findLocator } from './locate.ts';
 import { Observer } from './observe.ts';
+import { Watcher } from './watch.ts';
 import type { LoadedRecording } from './recording.ts';
 import { collapseUi, renderStep, renderSummary } from './report.ts';
 import { enableSlow } from './slow.ts';
@@ -54,6 +57,7 @@ export class ReplaySession {
   context?: BrowserContext;
   page?: Page;
   readonly observer = new Observer();
+  readonly watcher = new Watcher();
   rec?: LoadedRecording;
   steps: Step[] = [];
   results = new Map<number, StepResult>();
@@ -63,17 +67,49 @@ export class ReplaySession {
     if (this.page && !this.page.isClosed()) return this.page;
     const profile = process.env.REPLAY_PROFILE_DIR ?? join(homedir(), '.rrweb-replay', 'profile');
     mkdirSync(profile, { recursive: true });
-    this.context = await chromium.launchPersistentContext(profile, {
-      headless: process.env.REPLAY_HEADLESS === '1',
-      viewport: { width: 1440, height: 900 },
-    });
+    const launch = () =>
+      chromium.launchPersistentContext(profile, {
+        headless: process.env.REPLAY_HEADLESS === '1',
+        viewport: { width: 1440, height: 900 },
+      });
+    try {
+      this.context = await launch();
+    } catch (e) {
+      // First run on a machine: fetch the pinned browser once, then retry.
+      if (!/Executable doesn't exist/.test(String(e))) throw e;
+      process.stderr.write('replay-mcp: installing Chromium once (about 190 MB)...\n');
+      execFileSync(process.execPath, [join(dirname(createRequire(import.meta.url).resolve('playwright/package.json')), 'cli.js'), 'install', 'chromium'], { stdio: ['ignore', 2, 2] });
+      this.context = await launch();
+    }
+    // The site's sign-in is a session cookie, which Chromium drops on close; restore the saved copy.
+    this.statePath = join(profile, 'session-cookies.json');
+    if (existsSync(this.statePath)) {
+      await this.context.addCookies(JSON.parse(readFileSync(this.statePath, 'utf8'))).catch(() => undefined);
+    }
     await this.context.addInitScript(await injectScript());
     this.observer.attach(this.context);
+    await this.watcher.attach(this.context, (u) => templateRoute(new URL(u).pathname + new URL(u).search));
     this.page = this.context.pages()[0] ?? (await this.context.newPage());
     return this.page;
   }
 
+  private statePath?: string;
+
+  /** Keep the current cookies (sign-in included) for the next start. */
+  async saveSession(): Promise<void> {
+    if (!this.context || !this.statePath) return;
+    const cookies = await this.context.cookies().catch(() => []);
+    if (cookies.length) writeFileSync(this.statePath, JSON.stringify(cookies), { mode: 0o600 });
+  }
+
+  /** Leave the window open for you to look at, until you close it. */
+  async waitUntilClosed(): Promise<void> {
+    await this.saveSession();
+    await new Promise<void>((resolve) => this.context?.on('close', () => resolve()) ?? resolve());
+  }
+
   async close(): Promise<void> {
+    await this.saveSession();
     await this.context?.close().catch(() => undefined);
     this.context = undefined;
     this.page = undefined;
@@ -96,6 +132,7 @@ export class ReplaySession {
         await this.settleInitial(page);
       }
       const auth = await prepareAuth(page, steps, log);
+      await this.saveSession();
       const notes = auth === 'already-signed-in' ? [] : [`sign-in: ${auth}`];
       this.lastDigest = await digestOf(page);
 
@@ -140,6 +177,11 @@ export class ReplaySession {
       try {
         const found = step.locator !== undefined || step.candidates.length ? await findLocator(page, step, Math.min(limit, 20_000)) : null;
         if (needsTarget(step) && !found) {
+          const down = this.observer.all.filter((t) => t.resourceType === 'document' && (t.status ?? 0) >= 500).at(-1);
+          const why = down
+            ? `the page itself failed to load: ${down.method} ${new URL(down.url).pathname} → ${down.status} (the app/server, not the replay)`
+            : '';
+          if (why) return finish(step, 'unlocatable', startedAt, [why], [], '', undefined, []);
           return finish(step, 'unlocatable', startedAt, [`no element matched any of ${step.candidates.length} selectors${step.name ? ` or the name "${step.name}"` : ''}`], [], '', undefined, []);
         }
         if (found?.repaired) notes.push(`located by ${found.via} (recorded locator did not match)`);

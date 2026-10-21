@@ -1,3 +1,4 @@
+import { getSecret, secretKey } from './secrets.ts';
 import { z } from 'zod/v4';
 import type { Step } from './types.ts';
 
@@ -78,11 +79,11 @@ function newStep(seq: number, ns: z.infer<typeof NewStep>, base: Step): Step {
   };
 }
 
-/** `$secret.NAME` → env REPLAY_SECRET_NAME. Never reads the recording. */
+/** `$secret.NAME` → env REPLAY_SECRET_NAME or the secrets file. Never reads the recording. */
 export function resolveValue(value: string | undefined): string | undefined {
   if (!value?.startsWith('$secret.')) return value;
-  const key = `REPLAY_SECRET_${value.slice('$secret.'.length).toUpperCase()}`;
-  const v = process.env[key];
-  if (v === undefined) throw new Error(`step needs a secret: set ${key} in the environment`);
+  const name = value.slice('$secret.'.length);
+  const v = getSecret(name);
+  if (v === undefined) throw new Error(`step needs a secret: set ${secretKey(name)} in the environment or in ~/.rrweb-replay/secrets.env`);
   return v;
 }

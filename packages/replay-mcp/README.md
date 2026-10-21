@@ -10,7 +10,14 @@ node src/cli.ts <zip> --set 18.value="check 2" --skip 7,8,9,10
 node src/cli.ts <zip> --reuse <saved-run> --slow 2000,6000
 ```
 
-Tools: `load_recording`, `run`, `inspect`, `screenshot`, `close_browser`.
+Tools: `load_recording`, `run`, `inspect`, `changes`, `keepalive`, `screenshot`, `close_browser`.
+
+The window stays open between calls and is closed after 15 minutes
+(`REPLAY_IDLE_MS`) with no call from the bot; any call renews it and `keepalive`
+only renews it. The sign-in is kept, so the next `run` reopens it signed in.
+You can also work in the window yourself: `changes` tells the bot what you did
+since it last asked (clicks, typed values, writes, screen differences; password
+fields are never reported, and the replay's own steps are left out).
 How a bot should use them: `../web-extension/skills/rrweb-replay/SKILL.md`.
 
 ## How a run works
@@ -58,8 +65,9 @@ runner first calls `GET <url>?endpoint=…&url=…` and expects `{"landed": bool
 | --- | --- |
 | `REPLAY_PROFILE_DIR` | browser profile (the saved sign-in) |
 | `REPLAY_HEADLESS=1` | no window (tests) |
+| `REPLAY_IDLE_MS` | idle time before the browser is closed (default 15 min) |
 | `REPLAY_LOGIN_WAIT_MS` | how long to wait for you to sign in by hand (default 5 min) |
-| `REPLAY_SECRET_<NAME>` | value for `$secret.<NAME>` |
+| `REPLAY_SECRET_<NAME>` | value for `$secret.<NAME>`; also read from `~/.rrweb-replay/secrets.env` (`REPLAY_SECRETS_FILE` to move it) |
 | `REPLAY_VERIFY_URL` | write verifier, see above |
 | `REPLAY_OUT_DIR` | where `last/run.json` is written (default `<zip>.runs/`) |
 

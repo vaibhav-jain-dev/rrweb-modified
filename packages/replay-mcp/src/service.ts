@@ -33,14 +33,20 @@ export class Service {
     const patch = args.reuse ? loadSavedRun(rec.path, args.reuse) : args.patch;
     const steps = applyPatch(rec.steps, patch);
     const verifyUrl = process.env.REPLAY_VERIFY_URL;
-    const out = await this.session.run({
-      steps,
-      rec,
-      slow: args.slow,
-      continueOnDiverge: args.continueOnDiverge,
-      verifier: verifyUrl ? httpVerifier(verifyUrl) : undefined,
-      log: args.log,
-    });
+    this.session.watcher.pause();
+    let out: Awaited<ReturnType<ReplaySession['run']>>;
+    try {
+      out = await this.session.run({
+        steps,
+        rec,
+        slow: args.slow,
+        continueOnDiverge: args.continueOnDiverge,
+        verifier: verifyUrl ? httpVerifier(verifyUrl) : undefined,
+        log: args.log,
+      });
+    } finally {
+      await this.session.watcher.resume(this.session.page);
+    }
     const dir = join(process.env.REPLAY_OUT_DIR ?? join(rec.path, '..', `${rec.name.replace(/\.zip$/, '')}.runs`), 'last');
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, 'run.json'), JSON.stringify({ patch, results: out.results }, null, 2));
@@ -92,6 +98,23 @@ export class Service {
     if (!page) return 'no browser open yet; call run first';
     const buf = await page.screenshot({ type: 'jpeg', quality: 55 });
     return { data: buf.toString('base64'), mimeType: 'image/jpeg' };
+  }
+
+  /** What you did in the browser (and what the page did) since the last time this was asked. */
+  async changes(): Promise<string> {
+    const page = this.session.page;
+    if (!page || page.isClosed()) return 'no browser open; call run first';
+    return this.session.watcher.report(page, this.session.observer);
+  }
+
+  /** Is the browser open, and where. */
+  state(): string {
+    const page = this.session.page;
+    return page && !page.isClosed() ? `browser open at ${page.url()}` : 'browser closed';
+  }
+
+  waitUntilClosed(): Promise<void> {
+    return this.session.waitUntilClosed();
   }
 
   close(): Promise<void> {

@@ -49,6 +49,21 @@ the recording. You do not drive the browser step by step; you plan once.
    step), `inspect {step, request}` (a body), `inspect {live: true}` (the page
    as text: route, messages, usable controls). `screenshot` is the last
    resort — text is cheaper and answers most questions.
+5. **The user can work in the same window.** When they say "I changed
+   something", call `changes`: it lists what they clicked and typed, the writes
+   the page made and how the screen differs, **since your last call to it** (so
+   it is short, and a second call says `nothing changed`). Your own `run` steps
+   are not listed. Then continue with a new patch or `run`.
+
+## Keep the session alive
+
+The browser stays open between calls but is **closed after 15 minutes with no
+call from you** (the saved sign-in stays, so the next `run` reopens it signed
+in). Any tool call renews the 15 minutes. If you are waiting on the user for
+longer than that, call `keepalive` at least every 12 minutes. Replies from
+`run`, `changes` and `keepalive` end with `[idle limit: closes in N min …]`;
+if a reply starts with `note: the browser was closed …`, the window was shut
+for being idle, so `run` again.
 
 ## Things that are not obvious
 

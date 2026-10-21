@@ -2,6 +2,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import type { Page } from 'playwright';
 import { Service } from '../src/service.ts';
 import { buildZip } from './fixture.ts';
 import { startMock } from './mock-app.ts';
@@ -86,4 +87,32 @@ describe('replay of a recording through the mock app', () => {
     await svc.close();
     expect(out).toMatch(/^STOPPED at step 5 \(unlocatable\)/);
   }, 90_000);
+
+  it('tells the bot what you did by hand since its last fetch, and nothing twice', async () => {
+    process.env.REPLAY_SECRET_PASSWORD = 'pw';
+    const svc = new Service();
+    svc.load(zip);
+    await svc.run({ patch: { set: { '6.value': 'first' } } });
+    const page = (svc as unknown as { session: { page: Page } }).session.page;
+    expect(await svc.changes()).toContain('nothing changed'); // the replay's own actions are not yours
+    await page.locator('#notes').fill('typed by hand');
+    await page.locator('#save').click();
+    await page.waitForFunction(() => document.getElementById('toast')?.textContent === 'Saved');
+    await new Promise((r) => setTimeout(r, 400));
+    const got = await svc.changes();
+    expect(got).toContain('YOU');
+    expect(got).toContain('"Notes" = typed by hand');
+    expect(got).toContain('click "Save Application"');
+    expect(got).toContain('PATCH /api/loan/:id → 200');
+    expect(app.patches.at(-1)).toEqual({ notes: 'typed by hand' });
+    expect(await svc.changes()).toContain('nothing changed');
+
+    // A slow save still running when the bot asks is reported again, with how it ended.
+    app.cfg.patchDelayMs = 1500;
+    await page.locator('#save').click();
+    expect(await svc.changes()).toContain('PATCH /api/loan/:id → still running');
+    await new Promise((r) => setTimeout(r, 2500));
+    expect(await svc.changes()).toMatch(/PATCH \/api\/loan\/:id → 200.*started before your last fetch/);
+    await svc.close();
+  });
 });

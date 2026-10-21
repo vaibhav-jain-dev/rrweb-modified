@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { compareStep } from '../src/compare.ts';
+import { Lease } from '../src/lease.ts';
 import { applyPatch, resolveValue } from '../src/patch.ts';
 import { collapseUi } from '../src/report.ts';
 import type { Step } from '../src/types.ts';
@@ -79,5 +80,32 @@ describe('report', () => {
   it('collapses the recorder-style repeated UI lines', () => {
     const lines = Array.from({ length: 40 }, () => 'div appeared: 3 rows');
     expect(collapseUi(lines)).toEqual(['div appeared: 3 rows ×40']);
+  });
+});
+
+describe('lease', () => {
+  it('closes after the idle time, renewed by any call, held by a running one', async () => {
+    vi.useFakeTimers();
+    const closed = vi.fn();
+    const lease = new Lease(15 * 60_000, closed);
+    lease.touch();
+    await vi.advanceTimersByTimeAsync(14 * 60_000);
+    lease.touch(); // any call renews
+    await vi.advanceTimersByTimeAsync(14 * 60_000);
+    expect(closed).not.toHaveBeenCalled();
+    expect(Math.round(lease.remainingMs() / 60_000)).toBe(1);
+
+    let finish!: () => void;
+    const running = lease.hold(() => new Promise<void>((r) => (finish = r)));
+    await vi.advanceTimersByTimeAsync(40 * 60_000); // a long run is not idle
+    expect(closed).not.toHaveBeenCalled();
+    finish();
+    await running;
+    await vi.advanceTimersByTimeAsync(15 * 60_000 + 1);
+    expect(closed).toHaveBeenCalledTimes(1);
+    expect(lease.takeExpiryNotice()).toContain('closed');
+    expect(lease.takeExpiryNotice()).toBeUndefined(); // said once
+    lease.stop();
+    vi.useRealTimers();
   });
 });
