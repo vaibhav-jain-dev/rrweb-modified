@@ -1,5 +1,6 @@
 /** The five operations, independent of how they are called (MCP or CLI). */
 import { mkdirSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { applyPatch } from './patch.ts';
 import type { Patch } from './patch.ts';
@@ -93,18 +94,52 @@ export class Service {
       .join('\n');
   }
 
-  async screenshot(): Promise<{ data: string; mimeType: string } | string> {
+  async screenshot(selector?: string): Promise<{ data: string; mimeType: string } | string> {
     const page = this.session.page;
-    if (!page) return 'no browser open yet; call run first';
-    const buf = await page.screenshot({ type: 'jpeg', quality: 55 });
+    if (!page) return 'no browser open yet; call watch {action:"start"} or run first';
+    const buf = selector
+      ? await page.locator(selector).first().screenshot({ type: 'jpeg', quality: 55, timeout: 5000 })
+      : await page.screenshot({ type: 'jpeg', quality: 55 });
     return { data: buf.toString('base64'), mimeType: 'image/jpeg' };
   }
 
-  /** What you did in the browser (and what the page did) since the last time this was asked. */
-  async changes(): Promise<string> {
-    const page = this.session.page;
-    if (!page || page.isClosed()) return 'no browser open; call run first';
-    return this.session.watcher.report(page, this.session.observer);
+  /** What you did in the browser (and what the page did) since the last time this was asked, or inside one note. */
+  async changes(note?: number): Promise<string> {
+    const page = this.session.page && !this.session.page.isClosed() ? this.session.page : undefined;
+    if (!page && note === undefined) return 'no browser open; call watch {action:"start"} (or run) first';
+    return this.session.watcher.report(page, this.session.observer, note);
+  }
+
+  /** Open the browser for a person to use; from now on their activity is seen. No recording needed. */
+  async watch(args: { action?: 'start' | 'stop'; url?: string }): Promise<string> {
+    const w = this.session.watcher;
+    if (args.action === 'stop') {
+      w.stop();
+      return `stopped watching. ${w.notes.length} note${w.notes.length === 1 ? '' : 's'} kept${w.logFile ? `; log ${w.logFile}` : ''}`;
+    }
+    const page = await this.session.ensureBrowser();
+    if (args.url) await page.goto(args.url, { waitUntil: 'domcontentloaded' });
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    w.logFile = join(process.env.REPLAY_WATCH_DIR ?? join(homedir(), '.rrweb-replay', 'watch'), `${stamp}.jsonl`);
+    await w.resume(page);
+    const at = page.url() === 'about:blank' ? 'a blank page (give a url, or open one in the window)' : page.url();
+    return `watching ${at}. Use the window as normal; ask changes for what is new, note to mark a moment, screenshot only when text is not enough.`;
+  }
+
+  /** The person's marker: a point in time ("note this"), or a span ("note from here") until closed. */
+  async note(args: { text?: string; from?: boolean; done?: number; list?: boolean }): Promise<string> {
+    const w = this.session.watcher;
+    if (args.list || (args.text === undefined && args.done === undefined)) return w.listNotes();
+    const page = this.session.page && !this.session.page.isClosed() ? this.session.page : undefined;
+    if (!page) return 'no browser open; call watch {action:"start"} first';
+    if (args.done !== undefined) {
+      const n = await w.closeNote(page, args.done);
+      return typeof n === 'string' ? n : `note ${n.id} closed · ask changes {note: ${n.id}} for what happened in it`;
+    }
+    const n = await w.addNote(page, args.text as string, !!args.from);
+    return args.from
+      ? `note ${n.id} open from here on ${n.route}; close it with note {done: ${n.id}}`
+      : `note ${n.id} saved on ${n.route}`;
   }
 
   /** Is the browser open, and where. */

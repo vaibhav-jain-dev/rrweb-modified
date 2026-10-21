@@ -17,7 +17,10 @@ const server = new McpServer(
       `The replay browser stays open between calls, but is closed after ${idleMin} min with no call from you (the saved sign-in stays). ` +
       'Any tool call renews that; if you will wait on the user for longer, call keepalive at least every ' +
       `${Math.max(1, Math.floor(idleMin) - 2)} min. The user may also click around in the browser themselves: call changes to learn what they did since you last asked (it returns only what is new). ` +
-      'If a call says the browser was closed, run again to reopen it.',
+      'If a call says the browser was closed, run again (or watch start) to reopen it. ' +
+      'Watching without a recording: watch {action:"start", url?} opens the window for the user; they use it freely. ' +
+      'When they say "note this" call note {text}; "note from here" call note {text, from:true} and later note {done:id}. ' +
+      'Ask changes (what is new) or changes {note:id} (what happened inside a note) instead of taking screenshots; use screenshot only when the text is not enough, with a selector for just one part.',
   },
 );
 
@@ -85,10 +88,28 @@ register(
   'changes',
   {
     description:
-      'What the user did in the browser by hand (clicks, typed values, page changes), the calls the page made and how the screen changed, since the last time you asked. Returns only what is new. Use it when the user says they changed something.',
-    inputSchema: {},
+      'What the user did in the browser by hand (clicks, typed values, page changes), the calls the page made and how the screen changed, since the last time you asked. Returns only what is new. With note: what happened inside that note instead. Use it when the user says they did something.',
+    inputSchema: { note: z.number().int().optional().describe('note id: show what happened inside that note') },
   },
-  () => guard(() => svc.changes(), true),
+  ({ note }) => guard(() => svc.changes(note), true),
+);
+
+register(
+  'watch',
+  {
+    description: 'Start watching: open the browser for the user (optionally at url) and follow what they do, with no recording needed. Sign in by hand if asked; the sign-in is kept. action stop: stop recording their activity.',
+    inputSchema: { action: z.enum(['start', 'stop']).optional(), url: z.string().optional() },
+  },
+  (a) => guard(() => svc.watch(a), true),
+);
+
+register(
+  'note',
+  {
+    description: 'The user\'s marker. text: "note this" (a point in time). text + from:true: "note from here" (a span until you call done). done: close span id. No arguments: list the notes.',
+    inputSchema: { text: z.string().optional(), from: z.boolean().optional(), done: z.number().int().optional() },
+  },
+  (a) => guard(() => svc.note(a)),
 );
 
 register(
@@ -102,10 +123,10 @@ register(
 
 register(
   'screenshot',
-  { description: 'Screenshot of the replay browser. Only when text from inspect(live) is not enough.', inputSchema: {} },
-  async () => {
+  { description: 'Screenshot (small jpeg) of the browser. Only when text from changes / inspect(live) is not enough. selector: just that element, cheaper.', inputSchema: { selector: z.string().optional() } },
+  async ({ selector }) => {
     try {
-      const s = await lease.hold(() => svc.screenshot());
+      const s = await lease.hold(() => svc.screenshot(selector));
       return typeof s === 'string' ? text(s) : { content: [{ type: 'image' as const, data: s.data, mimeType: s.mimeType }] };
     } catch (e) {
       return { ...text(`error: ${(e as Error).message}`), isError: true };

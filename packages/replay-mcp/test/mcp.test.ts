@@ -37,7 +37,7 @@ afterAll(async () => {
 describe('rrweb-replay over MCP stdio', () => {
   it('exposes the tools', async () => {
     const { tools } = await client.listTools();
-    expect(tools.map((t) => t.name).sort()).toEqual(['changes', 'close_browser', 'inspect', 'keepalive', 'load_recording', 'run', 'screenshot']);
+    expect(tools.map((t) => t.name).sort()).toEqual(['changes', 'close_browser', 'inspect', 'keepalive', 'load_recording', 'note', 'run', 'screenshot', 'watch']);
   });
 
   it('load → run with a patch → inspect live (text, not a picture) → screenshot on request', async () => {
@@ -86,6 +86,35 @@ describe('idle lease over MCP stdio', () => {
       expect(after).toContain('browser closed');
       expect(textOf(await c.callTool({ name: 'changes', arguments: {} }))).toContain('no browser open');
     } finally {
+      await c.close();
+    }
+  }, 60000);
+});
+
+describe('watch over MCP stdio', () => {
+  it('start watching without a recording, note, ask changes, screenshot one element', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'replay-watch-'));
+    const c = new Client({ name: 'watch', version: '0' });
+    await c.connect(
+      new StdioClientTransport({
+        command: 'node',
+        args: [new URL('../src/main.ts', import.meta.url).pathname],
+        env: { ...(process.env as Record<string, string>), REPLAY_HEADLESS: '1', REPLAY_PROFILE_DIR: join(dir, 'profile'), REPLAY_WATCH_DIR: join(dir, 'watch') },
+      }),
+    );
+    try {
+      expect(textOf(await c.callTool({ name: 'changes', arguments: {} }))).toContain('no browser open');
+      const w = textOf(await c.callTool({ name: 'watch', arguments: { action: 'start', url: `${app.origin}/login` } }));
+      expect(w).toContain('watching');
+      expect(w).toContain('idle limit'); // the bot is told how long the window lives
+      expect(textOf(await c.callTool({ name: 'note', arguments: { text: 'on the login page' } }))).toContain('note 1 saved');
+      expect(textOf(await c.callTool({ name: 'note', arguments: { text: 'from here', from: true } }))).toContain('open from here');
+      expect(textOf(await c.callTool({ name: 'note', arguments: {} }))).toContain('"on the login page"');
+      expect(textOf(await c.callTool({ name: 'changes', arguments: {} }))).toContain('nothing changed');
+      const shot = (await c.callTool({ name: 'screenshot', arguments: { selector: '#go' } })) as { content: { type: string }[] };
+      expect(shot.content.some((x) => x.type === 'image')).toBe(true);
+    } finally {
+      await c.callTool({ name: 'close_browser', arguments: {} }).catch(() => undefined);
       await c.close();
     }
   }, 60000);

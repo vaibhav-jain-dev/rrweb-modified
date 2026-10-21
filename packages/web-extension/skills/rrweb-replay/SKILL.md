@@ -55,6 +55,24 @@ the recording. You do not drive the browser step by step; you plan once.
    it is short, and a second call says `nothing changed`). Your own `run` steps
    are not listed. Then continue with a new patch or `run`.
 
+## Watching the user (no recording needed)
+
+When the user says "start watching" / "watch what I do", call
+`watch {action:"start", url?}`. The window opens (sign-in is kept; if it shows
+a login page the user signs in by hand) and they use it freely.
+
+- "note this" → `note {text}` (a point in time). "note from here" →
+  `note {text, from:true}`, then `note {done:id}` when they say they are done.
+  `note {}` lists the notes.
+- "what did I do?" / "I did something" → `changes` (only what is new since your
+  last ask). "what happened in note 2?" → `changes {note:2}` (clicks, typed
+  values, writes, errors, how the screen differed; short, text only).
+- Do **not** take screenshots to find out what happened; `changes` is cheaper.
+  `screenshot {selector}` of one part when you need to see it, a whole-page
+  `screenshot` last.
+- Passwords are never reported. `watch {action:"stop"}` stops recording;
+  notes stay, and a JSON-lines log is kept in `~/.rrweb-replay/watch/`.
+
 ## Keep the session alive
 
 The browser stays open between calls but is **closed after 15 minutes with no

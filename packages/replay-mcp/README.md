@@ -10,11 +10,17 @@ node src/cli.ts <zip> --set 18.value="check 2" --skip 7,8,9,10
 node src/cli.ts <zip> --reuse <saved-run> --slow 2000,6000
 ```
 
-Tools: `load_recording`, `run`, `inspect`, `changes`, `keepalive`, `screenshot`, `close_browser`.
+Tools: `load_recording`, `run`, `inspect`, `watch`, `note`, `changes`, `keepalive`, `screenshot`, `close_browser`.
 
 The window stays open between calls and is closed after 15 minutes
 (`REPLAY_IDLE_MS`) with no call from the bot; any call renews it and `keepalive`
 only renews it. The sign-in is kept, so the next `run` reopens it signed in.
+**Watch mode** needs no recording: `watch start` opens the window, you use it,
+you say "note this" / "note from here", and the bot asks `changes` (new since
+its last ask) or `changes {note}` (what happened inside a note). Screenshots
+are on demand only, of one element if asked. Events and notes are also logged
+to `~/.rrweb-replay/watch/*.jsonl` (`REPLAY_WATCH_DIR`).
+
 You can also work in the window yourself: `changes` tells the bot what you did
 since it last asked (clicks, typed values, writes, screen differences; password
 fields are never reported, and the replay's own steps are left out).

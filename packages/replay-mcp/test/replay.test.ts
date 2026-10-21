@@ -1,4 +1,4 @@
-import { mkdtempSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -115,4 +115,70 @@ describe('replay of a recording through the mock app', () => {
     expect(await svc.changes()).toMatch(/PATCH \/api\/loan\/:id → 200.*started before your last fetch/);
     await svc.close();
   });
+
+  it('watch mode with no recording: follows the user, keeps notes ("note this", "note from here"), screenshots only on demand', async () => {
+    process.env.REPLAY_WATCH_DIR = join(dir, 'watch');
+    process.env.REPLAY_PROFILE_DIR = join(dir, 'profile-watch'); // signed out: the earlier tests left a session in the shared one
+    const svc = new Service(); // no load_recording: nothing is replayed
+    expect(await svc.changes()).toContain('no browser open');
+    const started = await svc.watch({ action: 'start', url: `${app.origin}/login` });
+    expect(started).toContain('watching');
+    const page = (svc as unknown as { session: { page: Page } }).session.page;
+
+    // the user signs in by hand (the password must never be reported)
+    await page.locator('input[name=email]').fill('me@example.com');
+    await page.locator('input[name=password]').fill('hunter2-secret');
+    await page.locator('#go').click();
+    await page.waitForURL('**/home');
+    expect(await svc.note({ text: 'signed in' })).toContain('note 1 saved');
+
+    // "note from here": a span, then the work inside it
+    expect(await svc.note({ text: 'create a loan', from: true })).toContain('note 2 open from here');
+    await page.locator('#add').click();
+    await page.locator('#edit').waitFor();
+    await page.locator('#edit').click();
+    await page.locator('#notes').fill('watch me');
+    await page.locator('#save').click();
+    await page.waitForFunction(() => document.getElementById('toast')?.textContent === 'Saved');
+    await new Promise((r) => setTimeout(r, 400));
+    expect(await svc.note({ done: 2 })).toContain('note 2 closed');
+    await page.locator('#add').click(); // after the span: must not be inside note 2
+
+    const inside = await svc.changes(2);
+    expect(inside).toContain('note 2 "create a loan"');
+    expect(inside).toContain('click "Add Loan"');
+    expect(inside).toContain('"Notes" = watch me');
+    expect(inside).toContain('POST /api/loan');
+    expect(inside).toContain('PATCH /api/loan/:id → 200');
+    expect(inside).toContain('SCREEN');
+    expect(inside).not.toContain('me@example.com'); // the sign-in was before the span
+    expect(inside.split('click "Add Loan"').length).toBe(2); // the click after the span is not in it
+
+    const all = await svc.changes(); // everything new since watching began
+    expect(all).toContain('"Email" = me@example.com');
+    expect(all).toContain('[hidden]');
+    expect(all).not.toContain('hunter2-secret');
+    expect(all.split('click "Add Loan"').length).toBe(3); // both clicks, the one inside the note and the one after it
+    expect(await svc.changes()).toContain('nothing changed'); // and nothing twice
+
+    expect(await svc.note({ list: true })).toMatch(/1 .*"signed in"[\s\S]*2 .*"create a loan".* → /);
+
+    // a screenshot of one element is much smaller than the page, and only when asked
+    const whole = (await svc.screenshot()) as { data: string };
+    const part = (await svc.screenshot('#toast')) as { data: string; mimeType: string };
+    expect(part.mimeType).toBe('image/jpeg');
+    expect(part.data.length).toBeLessThan(whole.data.length / 3);
+
+    // stop: later activity is not recorded; the log on disk holds events and notes, never the password
+    expect(await svc.watch({ action: 'stop' })).toContain('2 notes kept');
+    await page.locator('#add').click();
+    expect(await svc.changes()).not.toContain('click "Add Loan"');
+    const logFile = (svc as unknown as { session: { watcher: { logFile: string } } }).session.watcher.logFile;
+    expect(existsSync(logFile)).toBe(true);
+    const log = readFileSync(logFile, 'utf8');
+    expect(log).toContain('"type":"note"');
+    expect(log).not.toContain('hunter2-secret');
+    await svc.close();
+  });
 });
+
