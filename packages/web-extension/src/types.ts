@@ -1,4 +1,5 @@
 import type { eventWithTime } from '@rrweb/types';
+import type { AgentConfig } from './agent/protocol';
 
 export enum SyncDataKey {
   settings = 'settings',
@@ -33,6 +34,10 @@ export enum LocalDataKey {
   recorderStatus = 'recorder_status',
   evidenceConfig = 'evidence_config',
   openNotes = 'open_notes',
+  /** Which live-agent playbooks to run, and where the backend is. */
+  agentConfig = 'agent_config',
+  /** Connection state of the agent backend for the current recording. */
+  agentStatus = 'agent_status',
 }
 
 export type LocalData = {
@@ -64,6 +69,18 @@ export type LocalData = {
   // outermost first. Mirrored here by the background script so the popup,
   // which is destroyed whenever it loses focus, can show them again.
   [LocalDataKey.openNotes]: OpenNote[];
+  [LocalDataKey.agentConfig]: AgentConfig;
+  [LocalDataKey.agentStatus]: AgentStatus;
+};
+
+/** Written by the worker's agent client so the side panel can say what is wrong. */
+export type AgentStatus = {
+  sessionId: string;
+  state: 'connecting' | 'connected' | 'lost' | 'finished';
+  model?: string;
+  lanes?: string[];
+  /** Plain-language reason, shown in the panel. */
+  message?: string;
 };
 
 export type OpenNote = { id: string; text: string; startedAt: number; depth: number };

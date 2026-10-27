@@ -1,0 +1,29 @@
+{
+  "name": "@rrweb/agent-backend",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Local backend for the live recording agent: watches a recording's events, verifies each write against the database and drives a side panel",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch src/main.ts",
+    "start": "node src/main.ts",
+    "probe": "node src/cli.ts probe",
+    "learn": "node src/cli.ts learn",
+    "check-types": "tsc -noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest watch"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "dependencies": {
+    "fflate": "^0.8",
+    "mongodb": "^6",
+    "ws": "^8",
+    "yaml": "^2"
+  },
+  "devDependencies": {
+    "@types/ws": "^8"
+  }
+}

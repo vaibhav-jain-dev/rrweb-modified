@@ -66,7 +66,16 @@
     "ext:dev": "yarn workspace @rrweb/web-extension dev:chrome",
     "ext:zip": "cross-env ZIP=true yarn ext:build",
     "ext:test": "yarn vitest run --project @rrweb/web-extension",
-    "doctor": "node scripts/doctor.mjs"
+    "doctor": "node scripts/doctor.mjs",
+    "update-ext": "node scripts/update-ext.mjs",
+    "agent:up": "node scripts/agent-up.mjs",
+    "agent:start": "yarn workspace @rrweb/agent-backend start",
+    "agent:dev": "yarn workspace @rrweb/agent-backend dev",
+    "agent:test": "yarn workspace @rrweb/agent-backend test",
+    "agent:probe": "yarn workspace @rrweb/agent-backend probe",
+    "agent:learn": "yarn workspace @rrweb/agent-backend learn",
+    "replay:mcp": "yarn workspace @rrweb/replay-mcp start",
+    "replay:test": "yarn workspace @rrweb/replay-mcp test"
   },
   "resolutions": {
     "**/cssom": "https://registry.npmjs.org/rrweb-cssom/-/rrweb-cssom-0.6.0.tgz",

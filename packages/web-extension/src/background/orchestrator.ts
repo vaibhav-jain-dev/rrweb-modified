@@ -11,6 +11,7 @@ import Browser from 'webextension-polyfill';
 import { EventType, IncrementalSource, type eventWithTime } from '@rrweb/types';
 import type Channel from '~/utils/channel';
 import { LocalDataKey, ServiceName } from '~/types';
+import type { LocalData } from '~/types';
 import { attachDebugger, detachDebugger, isAttached } from './cdp/attach';
 import { attachNetworkCapture } from './cdp/network';
 import { attachConsoleCapture } from './cdp/console';
@@ -30,6 +31,8 @@ import type {
   UIDigest,
 } from '~/evidence/types';
 import { appendEvidenceChunk, putEvidenceBlob } from '~/utils/storage';
+import { createAgentClient, type AgentClient, type SocketLike, type StatusUpdate } from '~/agent/client';
+import { DEFAULT_AGENT_CONFIG, type AgentConfig } from '~/agent/protocol';
 import type { SettleResult } from './export/build';
 
 const FLUSH_INTERVAL_MS = 500;
@@ -76,6 +79,54 @@ type State = {
 
 let state: State | undefined;
 
+/** The live agent for this recording, when playbooks were selected and the backend is reachable. */
+let agent: AgentClient | undefined;
+
+async function readAgentConfig(): Promise<AgentConfig> {
+  const stored = (await Browser.storage.local.get(LocalDataKey.agentConfig).catch(() => ({}))) as Partial<LocalData>;
+  return { ...DEFAULT_AGENT_CONFIG, ...(stored[LocalDataKey.agentConfig] ?? {}) };
+}
+
+/**
+ * Start the agent without ever delaying or failing the recording: the client
+ * buffers events until its socket is up, and a missing backend only shows in
+ * the side panel.
+ */
+async function startAgent(sessionId: string, tabId: number, startedAt: number): Promise<void> {
+  // The previous recording's status must not outlive it: the side panel
+  // follows whatever session is named here.
+  await Browser.storage.local.remove(LocalDataKey.agentStatus).catch(() => undefined);
+  try {
+    const config = await readAgentConfig();
+    if (config.playbooks.length === 0) return;
+    const tab = await Browser.tabs.get(tabId).catch(() => undefined);
+    const setStatus = (s: StatusUpdate) =>
+      void Browser.storage.local.set({ [LocalDataKey.agentStatus]: { sessionId, ...s } }).catch(() => undefined);
+    agent = createAgentClient(
+      config,
+      { sessionId, startedAt, pageOrigin: safeOrigin(tab?.url) },
+      {
+        createSocket: (url) => new WebSocket(url) as unknown as SocketLike,
+        onStatus: setStatus,
+        setTimer: (fn, ms) => setTimeout(fn, ms),
+        clearTimer: (t) => clearTimeout(t as ReturnType<typeof setTimeout>),
+        now: Date.now,
+      },
+    );
+  } catch (e) {
+    console.warn('[agent] could not start', e);
+    agent = undefined;
+  }
+}
+
+function safeOrigin(url: string | undefined): string {
+  try {
+    return url ? new URL(url).origin : '';
+  } catch {
+    return '';
+  }
+}
+
 export async function startOrchestration(
   tabId: number,
   windowId: number,
@@ -111,12 +162,15 @@ export async function startOrchestration(
     settleWork: [],
   };
 
+  void startAgent(session.id, tabId, session.createTimestamp);
+
   if (cdpAttached) {
     const s = state;
     s.unsubscribers.push(
       attachNetworkCapture(
         tabId,
         (req) => {
+          agent?.sendEvent({ kind: 'network', t: req.endTime ?? Date.now(), payload: req });
           s.buffers.network.push(req);
           s.settleTracker.noteRequestEnd();
           maybeEagerFlush(s);
@@ -331,6 +385,15 @@ export async function stopOrchestration(): Promise<EvidenceSession | undefined> 
   if (isAttached(s.tabId)) await detachDebugger(s.tabId);
 
   await flushState(s);
+
+  // Ask the agent for its ledger now that the last request has been captured.
+  // Whatever happens here, the recording itself is already safe.
+  if (agent) {
+    const a = agent;
+    agent = undefined;
+    const result = await a.stop(Date.now()).catch(() => undefined);
+    if (result) await appendEvidenceChunk(s.session.id, 'agent', 0, [result]).catch(() => undefined);
+  }
   // Notes still open stay open in the export (flagged as such); only the
   // popup's list is cleared. Their events were written as they happened.
   await Browser.storage.local.set({ [LocalDataKey.openNotes]: [] }).catch(() => undefined);

@@ -17,6 +17,9 @@ import type {
 import { inferApiOrigins } from './classify';
 import { templateRoute } from './route-template';
 import { describeActionRange } from './notes';
+import { agentTotals, describeAgentTotals } from './agent-export';
+import { STATUS_MARK } from '../agent/log';
+import type { Check } from '../agent/protocol';
 
 function shortenUrl(url: string): string {
   try {
@@ -221,6 +224,13 @@ export function renderFlow(bundle: EvidenceBundle): string {
     }
     lines.push('');
 
+    const agentChecks = agentChecksFor(bundle, action.seq);
+    if (agentChecks.length) {
+      lines.push('AGENT');
+      for (const c of agentChecks) lines.push(agentLine(c));
+      lines.push('');
+    }
+
     const diff = bundle.diffs[i];
     if (diff && diff.summary.length > 0) {
       lines.push('UI');
@@ -272,7 +282,24 @@ export function renderFlow(bundle: EvidenceBundle): string {
     for (const line of polling) lines.push(`  - ${line}`);
   }
 
+  const loose = (bundle.agent?.ledger.lanes ?? []).flatMap((l) => l.checks).filter((c) => c.actionSeq === undefined);
+  if (loose.length) {
+    lines.push('', 'AGENT (not tied to an action)');
+    for (const c of loose) lines.push(agentLine(c));
+  }
+
   return lines.join('\n');
+}
+
+function agentChecksFor(bundle: EvidenceBundle, actionSeq: number): Check[] {
+  return (bundle.agent?.ledger.lanes ?? []).flatMap((l) => l.checks).filter((c) => c.actionSeq === actionSeq);
+}
+
+/** `AGENT ▶ OK   Loan created · loan_application — Loan L-9 is in the database` */
+function agentLine(c: Check): string {
+  const asked = c.origin === 'ask' ? ` [asked: "${truncate(c.askText ?? '', 60)}"]` : '';
+  const warn = c.warnings?.length ? ` (⚠ ${c.warnings.length})` : '';
+  return `  AGENT ▶ ${STATUS_MARK[c.status]} ${truncate(c.claim, 70)}${asked} — ${truncate(c.note ?? c.status, 120)}${warn}`;
 }
 
 /**
@@ -310,6 +337,10 @@ function renderSummary(bundle: EvidenceBundle): string[] {
 
   const redacted = Object.values(bundle.redactionReport ?? {}).reduce((a, b) => a + b, 0);
   if (redacted) lines.push(`  redacted:     ${redacted} values removed at capture — see redaction-report.json`);
+  if (bundle.agent) {
+    lines.push(`  agent:        ${describeAgentTotals(agentTotals(bundle.agent))} — see agent/log.txt`);
+    if (bundle.agent.ledger.incomplete) lines.push('                the agent backend was lost during this recording; its ledger is incomplete');
+  }
   return lines;
 }
 
@@ -438,9 +469,10 @@ export function renderFindings(bundle: EvidenceBundle): string {
   );
   lines.push('');
 
+  const agentTail = renderAgentFindings(bundle);
   if (bundle.findings.length === 0) {
     lines.push('No candidates were surfaced by the heuristics for this session.');
-    return lines.join('\n');
+    return [...lines, ...agentTail].join('\n');
   }
 
   const byKind = new Map<UiDataFinding['kind'], UiDataFinding[]>();
@@ -516,7 +548,31 @@ export function renderFindings(bundle: EvidenceBundle): string {
     }
   }
 
-  return lines.join('\n');
+  return [...lines, ...agentTail].join('\n');
+}
+
+/**
+ * What the live agent noticed that is not a verified check: writes nothing
+ * verified, error responses, steps that never happened, and anything the
+ * model said. All of it is a lead to check, none of it a finding.
+ */
+function renderAgentFindings(bundle: EvidenceBundle): string[] {
+  if (!bundle.agent) return [];
+  const out: string[] = [];
+  for (const lane of bundle.agent.ledger.lanes) {
+    const uncovered = Object.entries(lane.uncovered);
+    if (uncovered.length === 0 && lane.anomalies.length === 0 && lane.observations.length === 0) continue;
+    out.push('', `## Agent observations - ${lane.title} (unverified)`, '');
+    if (uncovered.length) {
+      out.push('Writes the agent had no rule for, so nothing was checked against the database:');
+      for (const [endpoint, n] of uncovered) out.push(`- ${endpoint} ×${n}`);
+      out.push('');
+    }
+    for (const a of lane.anomalies.filter((x) => x.kind !== 'uncovered_write')) out.push(`- ${a.text}`);
+    for (const o of lane.observations) out.push(`- (model, unverified) ${o.text}`);
+    out.push('');
+  }
+  return out;
 }
 
 /**
@@ -532,7 +588,7 @@ export const SKILL_NAME = 'rrweb-evidence-recording';
  * reader written against the previous shape would get wrong. The skill's
  * references/package-format.md is written against this number.
  */
-export const PACKAGE_SCHEMA_VERSION = 2;
+export const PACKAGE_SCHEMA_VERSION = 3;
 
 /**
  * The package's own README: the entry point, so it carries what a reader
@@ -571,6 +627,9 @@ export function renderReadme(bundle: EvidenceBundle, sizes: Record<string, numbe
     '',
     `1. **flow.md**${size('flow.md')} - a SUMMARY, then one block per action: what was done, the requests it caused, how the UI changed, the screenshot.${notesHint}`,
     `2. **findings.md**${size('findings.md')} - heuristic API-vs-UI candidates to verify, never asserted bugs. Only when the question is about data not shown, hidden controls or counts.`,
+    ...(bundle.agent
+      ? [`2b. **agent/log.txt**${size('agent/log.txt')} - what the live agent checked against the database while this was recorded, in time order; **agent/ledger.json**${size('agent/ledger.json')} has every check with its evidence. A \`failed\` or \`never_seen\` check is the first place to look; \`AGENT ▶\` lines in flow.md show each result under the action it followed.`]
+      : []),
     `3. Drill-down for one actionSeq only, never read whole: actions.json[n] · network/index.json${size('network/index.json')} filtered to actionSeq=n · network/curl.sh (a reproducible curl per request) · ui-state/digests.json${size('ui-state/digests.json')} filtered to actionSeq=n · screenshots/action-000n-after.jpg · console.json · storage.json · app-map.json.`,
     '',
     '`actionSeq` is the join key: the same n names the same moment in every file.',
@@ -613,6 +672,7 @@ export function renderManifest(bundle: EvidenceBundle, sizes: Record<string, num
         findings: bundle.findings.length,
         notes: bundle.notes?.length ?? 0,
         screenshots: screenshots.size,
+        ...(bundle.agent ? { agent_checks: bundle.agent.ledger.lanes.reduce((n, l) => n + l.checks.length, 0) } : {}),
       },
       files,
     },

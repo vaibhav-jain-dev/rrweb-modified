@@ -1,0 +1,3 @@
+# real settings and credentials never go in git
+.env
+config/*/.env

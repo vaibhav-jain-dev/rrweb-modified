@@ -16,6 +16,11 @@ say what the evidence supports — separately from what it does not.
 
 Stop here if the report is about a route the session never visited: say so.
 
+If `README.md` lists `agent/log.txt`, read it now (a few KB). Every `FAIL`
+and `MISS` line names the write that did not reach the database, the request
+it followed and the `actionSeq`; that is usually the moment. `SKIP` means the
+database could not be asked, which is not a pass.
+
 ## 2. Find the moment
 
 - The report names a click or a page: match its label / route in `flow.md`.

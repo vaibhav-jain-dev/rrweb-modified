@@ -1,7 +1,8 @@
 # The recording package, file by file
 
 The zip is written by `src/background/export/build.ts` (`packageBundle`) from
-the types in `src/evidence/types.ts`. Schema version 2 (2 dropped `summary.json`,
+the types in `src/evidence/types.ts`. Schema version 3 (3 added the optional
+`agent/` files and `AGENT ▶` lines in flow.md; 2 dropped `summary.json`,
 which repeated flow.md and actions.json, and moved flow.md's per-action
 DRILL-DOWN line into its header). When a field here and
 the code disagree, the code is right and this file needs a fix in the same
@@ -24,6 +25,14 @@ change.
 | `app-map.json` | pretty JSON | `AppMap {nodes, edges}` — routes, nav items, tabs, dialogs, tables seen |
 | `screenshots/action-NNNN-after.jpg` | JPEG | the viewport after action NNNN settled; a repeat of an earlier state is not stored again and `flow.md` points at the earlier file |
 | `redaction-report.json` | pretty JSON | `{reason: count}` — what was removed at capture time and why |
+| `agent/ledger.json` | pretty JSON | only when the live agent ran. `Ledger {sessionId, startedAt, endedAt?, model?, incomplete?, lanes[]}`; see below |
+| `agent/log.txt` | text | the narrative, rendered from the ledger: one line per check, anomaly and model remark, in time order, then *Writes with no verifier* and *Look first* |
+
+A recording can be repeated by the `rrweb-replay` MCP (`packages/replay-mcp`),
+which reads only `actions.json` (type, `target.locator`, `selectorCandidates`,
+`value`, `page`), `network/index.json` (`actionSeq`, `tier`, `status`,
+`duration`) and `ui-state/digests.json` (route and `status` messages per action).
+A replay writes `<zip>.runs/last/run.json`, not a recording zip.
 
 Not in the package: the raw rrweb event stream, cookies. `rrwebId` on an
 action is a mirror id, not a pointer into a file.
@@ -161,3 +170,30 @@ how-to-verify instruction stated once per section rather than per entry.
   firstSeenAction, states[], reachedBy?}], edges[{from, to, via: click|nav|route}]}`.
   Node ids embed the full route, so they are long; `firstSeenAction` is the
   actionSeq to look at.
+
+## `agent/ledger.json`
+
+Present only when playbooks were selected in the popup. Times are milliseconds
+from `startedAt`.
+
+- `lanes[]` — one per playbook: `{playbookId, title, verdict {verified, failed,
+  unchecked, never_seen, observed, pending}, headline, checks[], steps?,
+  gateReadyAt?, observations[], anomalies[], uncovered {"POST /x/:id": n}}`.
+- `checks[]` — `{id, ruleId, origin: "playbook"|"ask", askText?, claim, status,
+  requestId?, endpoint?, tObserved, tResolved, actionSeq?, evidence[], note?,
+  warnings?}`.
+  - `status`: `verified` (every hard expectation held), `failed` (the database
+    answered and disagreed), `unchecked` (it could not be asked: source down,
+    bad arguments, or the recording stopped first), `never_seen` (a required
+    call never happened).
+  - `actionSeq` is the join key into the rest of the package, taken from the
+    request the check followed; a check with no request (an *ask*) is placed
+    after the last action before it.
+  - `warnings` are soft expectations that did not hold; the check still passed.
+- `evidence[]` — `request {requestId, endpoint, status, url}` · `tool {tool,
+  args, result, ref, ms, attempt}` (`result` holds only the fields the lookup
+  declared; sensitive-looking keys are `[REDACTED]`) · `assert {path, op,
+  expected, actual, ok, soft?}` · `error {message}` · `timeout {withinMs}`.
+- `observations[]` are written by the model and are never verified.
+- `incomplete: true` means the agent backend was lost mid-recording; the ledger
+  is the last one it sent.

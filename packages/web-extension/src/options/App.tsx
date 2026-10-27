@@ -3,6 +3,7 @@ import SidebarWithHeader from '~/components/SidebarWithHeader';
 import { FiList, FiSettings } from 'react-icons/fi';
 import { Box } from '@chakra-ui/react';
 import NetworkExclusions from './NetworkExclusions';
+import AgentSettings from './AgentSettings';
 
 export default function App() {
   return (
@@ -24,7 +25,15 @@ export default function App() {
     >
       <Box p="10">
         <Routes>
-          <Route path="/" element={<NetworkExclusions />} />
+          <Route
+            path="/"
+            element={
+              <>
+                <NetworkExclusions />
+                <AgentSettings />
+              </>
+            }
+          />
         </Routes>
       </Box>
     </SidebarWithHeader>

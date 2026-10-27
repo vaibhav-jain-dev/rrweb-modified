@@ -6,6 +6,8 @@
  * the exported package).
  */
 
+import type { AgentResult } from '../agent/protocol';
+
 export type Redacted<T = string> = T | { redacted: true; reason: string };
 
 export type PageRef = {
@@ -298,4 +300,6 @@ export type EvidenceBundle = {
   redactionReport?: Record<string, number>;
   /** The recorder's own comments, in start order. Absent when none were made. */
   notes?: NoteSpan[];
+  /** What the live agent verified during the recording. Absent when it was not used. */
+  agent?: AgentResult;
 };

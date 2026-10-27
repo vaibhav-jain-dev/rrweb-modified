@@ -33,6 +33,8 @@ import { emptyAppMap, mergeAppMapNodes, recordNavigationEdge } from '~/evidence/
 import { foldNotes } from '~/evidence/notes';
 import { serializeDigests } from '~/evidence/digest-export';
 import { serializeNetwork } from '~/evidence/network-export';
+import { attachActionSeq } from '~/evidence/agent-export';
+import type { AgentResult } from '~/agent/protocol';
 import { dedupeScreenshotRefs, remapFindingScreenshotRefs } from '~/evidence/screenshot-export';
 import type {
   ActionRecord,
@@ -82,6 +84,7 @@ export async function buildEvidenceBundle(session: EvidenceSession): Promise<Evi
   const storageDeltas = await getEvidenceItems<StorageDelta>(session.id, 'storage');
   const settleResults = await getEvidenceItems<SettleResult>(session.id, 'digest');
   const noteEvents = await getEvidenceItems<NoteEvent>(session.id, 'note');
+  const agentResults = await getEvidenceItems<AgentResult>(session.id, 'agent');
   // One tally per stop; summed in case a session was stopped and resumed.
   const redactionReport: RedactionReport = {};
   for (const tally of await getEvidenceItems<RedactionReport>(session.id, 'redaction')) {
@@ -203,6 +206,8 @@ export async function buildEvidenceBundle(session: EvidenceSession): Promise<Evi
     findings: dedupedFindings,
     redactionReport,
     notes: notes.length ? notes : undefined,
+    // The last result wins if a session was stopped and resumed.
+    agent: agentResults.length ? attachActionSeq(agentResults[agentResults.length - 1], network, actions) : undefined,
   };
 }
 
@@ -263,6 +268,10 @@ export async function packageBundle(bundle: EvidenceBundle): Promise<Blob> {
     JSON.stringify(serializeDigests(bundle.actions, bundle.digests)),
   );
   files['app-map.json'] = strToU8(JSON.stringify(bundle.appMap, null, 2));
+  if (bundle.agent) {
+    files['agent/ledger.json'] = strToU8(JSON.stringify(bundle.agent.ledger, null, 2));
+    files['agent/log.txt'] = strToU8(bundle.agent.log);
+  }
   files['redaction-report.json'] = strToU8(JSON.stringify(bundle.redactionReport ?? {}, null, 2));
 
   // bundle.screenshots was already deduped in buildEvidenceBundle (repeats

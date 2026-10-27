@@ -1,0 +1,238 @@
+# Where the agent looks things up, and the named lookups it may run.
+#
+# Rules that keep this safe with a small model:
+#   - The model (and playbooks) can only call a tool below by name. There is no
+#     "run a query" tool.
+#   - Every $arg is bound with its declared type; it can never become an operator.
+#   - `project` is the only part of a document that leaves the backend, and keys
+#     that look sensitive (ssn, token, password, ...) are hidden even inside it.
+#   - Nothing here can write. The mongo source only ever calls find/count.
+#
+# Credentials are read at runtime from the env file named below and are never
+# copied, logged or written to a ledger.
+
+sources:
+  devlms:
+    type: mongo
+    # `KEY: value` and `KEY=value` files are both fine. The database name comes
+    # from MONGO_INITDB_DATABASE in that file (devlms).
+    envFile: ~/projects/.env.mongo
+    maxTimeMs: 4000
+    # Collections that hold personal data stay out of reach entirely.
+    deny:
+      [
+        profiles,
+        profile_sync_operations,
+        title_companies,
+        lms_permissions,
+        email_messages,
+      ]
+    # DocumentDB over TLS / an SSH tunnel / a local docker copy are all
+    # configured with AGENT_MONGO_* variables (see README), not here.
+
+tools:
+  # ---- loan --------------------------------------------------------------
+  loan_application:
+    source: devlms
+    description: The loan application document by its id (milestone, number, folder, product).
+    collection: loan_applications
+    args: { id: id }
+    filter: { _id: $id }
+    one: true
+    project:
+      [
+        loan_application_number,
+        loan_milestone_id,
+        product_id,
+        loan_product_id,
+        folder_id,
+        channel_id,
+        is_archived,
+        is_completed,
+        active,
+        created_by,
+        created_at,
+        updated_at,
+      ]
+
+  loan_fields_data:
+    source: devlms
+    description: Saved values of specific loan fields (loan_fields_data.fields_data.<field_id>.value).
+    collection: loan_fields_data
+    args: { loan_id: id, fields: 'string[]' }
+    filter: { loan_id: $loan_id }
+    one: true
+    project: [updated_at]
+    projectEach: { arg: fields, path: 'fields_data.{}.value' }
+
+  loan_milestone_rows:
+    source: devlms
+    description: Per-loan milestone rows (one per milestone the loan carries).
+    collection: loan_application_milestones
+    args: { loan_id: id }
+    filter: { loan_application_id: $loan_id }
+    project: [milestone_id, created_at, updated_at]
+    limit: 30
+
+  loan_conditions:
+    source: devlms
+    description: Conditions embedded in a loan application (id, title, status).
+    collection: loan_applications
+    args: { loan_id: id }
+    filter: { _id: $loan_id }
+    one: true
+    project:
+      [
+        conditions._id,
+        conditions.title,
+        conditions.status,
+        conditions.condition_status_id,
+        conditions.updated_at,
+      ]
+
+  loan_notes:
+    source: devlms
+    description: Most recent notes on a loan, newest first (includes system-generated notes).
+    collection: notes
+    args: { loan_id: id }
+    filter: { loan_id: $loan_id }
+    sort: { created_at: -1 }
+    limit: 8
+    project:
+      [
+        note,
+        created_by,
+        is_system_generated,
+        condition_id,
+        show_to_external,
+        linked_document_id,
+        created_at,
+      ]
+
+  note_by_id:
+    source: devlms
+    description: A single note by id.
+    collection: notes
+    args: { id: id }
+    filter: { _id: $id }
+    one: true
+    project:
+      [
+        note,
+        loan_id,
+        condition_id,
+        created_by,
+        is_system_generated,
+        show_to_external,
+        created_at,
+      ]
+
+  loan_events:
+    source: devlms
+    description: Most recent event-trail entries for a loan (what the system recorded as having happened).
+    collection: event_trail
+    args: { loan_id: id }
+    filter: { loan_application_id: $loan_id }
+    sort: { created_at: -1 }
+    limit: 8
+    project: [event_type, resource_name, resource_id, created_by, created_at]
+
+  instance_visibility:
+    source: devlms
+    description: Saved visibility of repeated (multi-instance) sections for a loan.
+    collection: loan_applications_instance_visibility
+    args: { loan_id: id }
+    filter:
+      $or:
+        - { loan_application_id: $loan_id }
+        - { loan_id: $loan_id }
+    one: true
+    project: all
+
+  # ---- configuration (forms, templates, fields, conditions) ---------------
+  form_by_id:
+    source: devlms
+    description: A product form by id.
+    collection: forms
+    args: { id: id }
+    filter: { _id: $id }
+    one: true
+    project:
+      [
+        label,
+        product,
+        active,
+        channel_id,
+        created_at,
+        updated_at,
+        templates._id,
+      ]
+
+  template_by_id:
+    source: devlms
+    description: A form template by id.
+    collection: templates
+    args: { id: id }
+    filter: { _id: $id }
+    one: true
+    project:
+      [label, products, is_default, active, channel_id, created_at, updated_at]
+
+  job_by_id:
+    source: devlms
+    description: A background job row by id (template save returns a job_id).
+    collection: jobs
+    args: { id: id }
+    filter: { _id: $id }
+    one: true
+    project: all
+
+  field_by_id:
+    source: devlms
+    description: A product field definition by id.
+    collection: fields
+    args: { id: id }
+    filter: { _id: $id }
+    one: true
+    project:
+      [
+        label,
+        variable,
+        type,
+        product_id,
+        channel_id,
+        is_linked,
+        is_loan_constant,
+        output_type,
+        created_at,
+        updated_at,
+      ]
+
+  condition_by_id:
+    source: devlms
+    description: A condition catalog entry by id.
+    collection: conditions
+    args: { id: id }
+    filter: { _id: $id }
+    one: true
+    project:
+      [
+        title,
+        persona,
+        condition_group_id,
+        active,
+        product_id,
+        created_at,
+        updated_at,
+      ]
+
+  conditions_by_title:
+    source: devlms
+    description: Newest condition catalog entries with a given exact title.
+    collection: conditions
+    args: { title: string }
+    filter: { title: $title }
+    sort: { created_at: -1 }
+    limit: 5
+    project:
+      [title, persona, condition_group_id, active, product_id, created_at]

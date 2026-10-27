@@ -100,6 +100,15 @@ directory (for Claude Code, symlink it into `~/.claude/skills/`); a change to
 the export format and the change to its description belong in the same pull
 request.
 
+## Replaying a recording
+
+`packages/replay-mcp` turns a `recording-*.zip` back into a run: an MCP server
+(`yarn replay:mcp`, registered in `.mcp.json`) and CLI that repeat the steps in
+a visible browser with a patch of changes, wait through slow APIs, and report
+only the step that differed. Sign-in comes from the browser session, never from
+the recording. See [`packages/replay-mcp/README.md`](../replay-mcp/README.md) and
+[`skills/rrweb-replay`](skills/rrweb-replay/SKILL.md).
+
 ## Sponsors
 
 [Become a sponsor](https://opencollective.com/rrweb#sponsor) and get your logo on our README on Github with a link to your site.

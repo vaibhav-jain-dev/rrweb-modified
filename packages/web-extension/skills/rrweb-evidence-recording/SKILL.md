@@ -4,7 +4,7 @@ description: Records a DEV/staging browser session — every user action, the ne
 license: MIT
 metadata:
   author: rrweb-modified
-  version: "2"
+  version: "3"
   produces: "recording-*.zip"
   entry: README.md
   links: "tech:rrweb, tech:chrome-devtools-protocol, concept:evidence-recording, concept:session-replay"
@@ -50,6 +50,7 @@ extension's own scripts); leave the recommended defaults on.
 | --- | --- | ---: | --- |
 | 1 | `README.md` | 1 KB | counts, schema version, whether the recorder left comments, and the byte size of each file below |
 | 2 | `flow.md` | 5–10 KB | one block per action: what was done, the primary requests, the UI diff, the screenshot |
+| 2b | `agent/log.txt` | 1–5 KB | only when the recording was made with the live agent (README says so): what it checked against the database after each write, in time order. A `FAIL` or `MISS` line is the first place to look; `agent/ledger.json` holds every check with its evidence |
 | 3 | `findings.md` | 5–15 KB | candidates to verify, grouped by rule — never asserted bugs; only when the question is about data not shown, hidden controls or counts |
 | 4 | `network/index.json` | MBs | full requests and responses — find the `actionSeq`, then the `requestId`; **never read it whole** |
 | 5 | `ui-state/digests.json`, `app-map.json`, `console.json`, `storage.json`, `screenshots/` | | drill-down for one action |
@@ -80,6 +81,13 @@ screen read as one screen. The exact route is in `actions.json`.
   endpoint** — one entry naming `GET /path/:id` and the JSON paths it
   concerns — because that is the unit to verify: does this screen render
   what this call returns. Sixty paths under one endpoint is one question.
+- **`agent/` lines are verdicts from a database, not from a person or a model.**
+  A check is `verified` / `failed` / `unchecked` (the database could not be asked) /
+  `never_seen`, and code sets it by comparing a real lookup with the request.
+  `AGENT ▶ … ` lines in `flow.md` sit under the action each check followed.
+  Anything marked *(model)* — in `agent/log.txt` or under *Agent observations* in
+  `findings.md` — is a guess and stays a candidate. *Writes with no verifier* are
+  writes nobody checked, not writes that were fine.
 - `tier: noise` means a settings rule excluded the request; `secondary` is
   static assets and same-origin non-API traffic; `primary` is what the app's
   backend was asked. Tiering is heuristic, not a judgement of relevance.
@@ -120,3 +128,7 @@ screen read as one screen. The exact route is in `actions.json`.
 - `references/package-format.md` — every file and field in the zip, with types.
 - `references/reading-a-recording.md` — the playbook: from a bug report to a
   reproduction, and what to write up.
+- `../rrweb-replay/SKILL.md` — to *repeat* a recording in a browser with
+  changes (another value, a skipped detour) instead of reading it: the
+  `rrweb-replay` MCP plays `actions.json` back and reports only where it
+  diverged.

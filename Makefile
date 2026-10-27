@@ -14,7 +14,7 @@ else
 OPEN := xdg-open
 endif
 
-.PHONY: run stop restart guide doctor build
+.PHONY: run stop restart guide doctor build run-backend update-ext update-extension
 
 # `yarn ext:dev` (vite dev, for HMR) and `yarn ext:build` (plain vite
 # build) write to separate directories - dist/chrome-dev vs dist/chrome -
@@ -56,3 +56,21 @@ endif
 
 doctor:
 	@yarn doctor
+
+# Live agent backend: checks Node, dependencies, Ollama and the model, fixes
+# what is missing (asks before installing Ollama), warms the model onto the
+# GPU, then runs the backend in the foreground. Does nothing if it is already
+# up. AGENT_MODEL=none runs rules-only without Ollama.
+run-backend:
+	@node scripts/agent-up.mjs
+
+# Bring the unpacked Chrome extension up to date: reinstall only if the
+# lockfiles changed, rebuild, verify the output, and warn if the running agent
+# backend is older than its code. Then reload it in chrome://extensions.
+#   make update-ext                      build
+#   make update-ext ARGS=--check         type-check + tests first
+#   make update-ext ARGS=--restart-backend
+update-ext:
+	@node scripts/update-ext.mjs $(ARGS)
+
+update-extension: update-ext
