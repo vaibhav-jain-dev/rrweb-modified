@@ -103,6 +103,10 @@ screen read as one screen. The exact route is in `actions.json`.
 - API origins are inferred from the traffic (every origin that answered a
   fetch/XHR with JSON) and listed in the `SUMMARY`; a JSON API that the
   session never called cannot be inferred and its requests tier by heuristics.
+- On a long page a digest lists only part of the page and says so in
+  `truncated` (totals found). A control or list missing from such a digest
+  may just not have been listed, and `ax-ignored` is never set on pages over
+  4,000 elements.
 - Recordings made before schema 1 stored no `actionT` on settle results, so
   their digests and screenshots were paired to actions by nearest time and
   rapid actions could share one; on those, trust `digestHash` over the file

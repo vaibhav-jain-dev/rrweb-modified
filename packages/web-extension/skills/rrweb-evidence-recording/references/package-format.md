@@ -121,7 +121,15 @@ structural fallback and is what a `body > div:nth-of-type(3)` label means.
 (tables and lists with their row counts), `controls[{selector, role, name?,
 value?, checked?, disabled?, expanded?, selected?, state}]`, `status[{role:
 alert|status|dialog|toast, text}]`, `counters {label: number}`, `textAtoms[]`
-(visible text), `hiddenAtoms[]` (present but not visible), `digestHash`.
+(visible text), `hiddenAtoms[]` (present but not visible), `digestHash`,
+`elementCount?` (DOM size), `truncated?{controls?, collections?, landmarks?}`.
+
+A long page is described in part, so building the digest can't freeze it:
+at most 300 controls (on-screen ones first), 50 collections (largest first)
+and 30 landmarks, each within a small time budget, and text atoms from the
+first 20,000 text nodes. `truncated` holds the total found for each list
+that was cut. The AX cross-check (`ax-ignored`) is skipped after scrolls and
+on pages over 4,000 elements.
 
 `state` is one of `visible-usable`, `visible-disabled`, `dom-only-hidden`,
 `ax-ignored` — the last two are what `findings.md`'s "hidden" and

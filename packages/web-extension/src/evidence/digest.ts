@@ -6,11 +6,37 @@
  */
 import { computeAccessibleName, computeVisibility } from './accname';
 import { buildSelector } from './selector';
+import { boundedText } from './text';
 import type { CollectionInfo, ControlInfo, UIDigest, UIDiff, VisibilityState } from './types';
 
 const MAX_SAMPLE_ROWS = 20;
 const MAX_TEXT_ATOMS = 300;
 const MAX_ATOM_LEN = 200;
+// A long page (a feed after a few minutes of scrolling) has thousands of
+// controls and repeated lists, and every one listed costs a selector checked
+// against the whole document. Listing all of them grew with the square of
+// the page: 3s at 14k elements, 28s at 42k, blocking the page after every
+// action. Past these caps the digest keeps a selection and says so in
+// `truncated`.
+const MAX_CONTROLS = 300;
+const MAX_COLLECTIONS = 50;
+const MAX_LANDMARKS = 30;
+const MAX_STATUS = 20;
+const MAX_STATUS_LEN = 1000;
+const MAX_HEADINGS = 30;
+const MAX_COUNTER_TEXT = 100_000;
+// Even capped, each listed control or collection costs a selector checked
+// against the whole document, so on a huge page the caps alone still mean
+// a long freeze. Selector work stops at these budgets; what was left out
+// shows in `truncated`.
+const CONTROLS_BUDGET_MS = 50;
+const COLLECTIONS_BUDGET_MS = 30;
+/** Listed whatever the budget, so a digest always describes what is on screen. */
+const MIN_CONTROLS = 10;
+/** Text nodes the atom walk visits. Visible text usually fills its cap early;
+ * past that the walk only looks for hidden text, and a long page would
+ * otherwise be read to the end after every action. */
+const MAX_ATOM_WALK = 20_000;
 
 const CONTROL_ROLES = [
   'button',
@@ -61,31 +87,23 @@ function inputRole(el: HTMLInputElement): string {
   return 'textbox';
 }
 
-function extractCollections(doc: Document): CollectionInfo[] {
-  const collections: CollectionInfo[] = [];
+type CollectionCandidate = {
+  el: Element;
+  kind: 'table' | 'list' | 'repeat';
+  rows: Element[];
+};
+
+function findCollectionCandidates(doc: Document): CollectionCandidate[] {
+  const candidates: CollectionCandidate[] = [];
   const seen = new Set<Element>();
 
   // tables
   doc.querySelectorAll('table').forEach((table) => {
     if (seen.has(table)) return;
     seen.add(table);
-    const headerCells = Array.from(table.querySelectorAll('thead th, thead td'));
-    const columns = headerCells.map((c) => normalizeText(c.textContent ?? ''));
     const bodyRows = Array.from(table.querySelectorAll('tbody tr'));
     const rows = bodyRows.length ? bodyRows : Array.from(table.querySelectorAll('tr')).slice(1);
-    const sampleRows = rows.slice(0, MAX_SAMPLE_ROWS).map((row) =>
-      Array.from(row.querySelectorAll('td')).map((cell) => normalizeText(cell.textContent ?? '')),
-    );
-    const { selector } = buildSelector(table, doc);
-    collections.push({
-      key: selector,
-      selector,
-      label: nearbyLabel(table),
-      count: rows.length,
-      columns: columns.length ? columns : undefined,
-      sampleRows,
-      rowKeyHint: guessKeyColumn(columns),
-    });
+    candidates.push({ el: table, kind: 'table', rows });
   });
 
   // role=list / ul / ol with repeated li item shape (skip nav lists)
@@ -97,16 +115,7 @@ function extractCollections(doc: Document): CollectionInfo[] {
     );
     if (items.length < 2) return;
     seen.add(list);
-    const { selector } = buildSelector(list, doc);
-    collections.push({
-      key: selector,
-      selector,
-      label: nearbyLabel(list),
-      count: items.length,
-      sampleRows: items
-        .slice(0, MAX_SAMPLE_ROWS)
-        .map((item) => [normalizeText(item.textContent ?? '')]),
-    });
+    candidates.push({ el: list, kind: 'list', rows: items });
   });
 
   // grid/card-repeat patterns: a container whose children share the same
@@ -120,21 +129,57 @@ function extractCollections(doc: Document): CollectionInfo[] {
     if (!uniform) return;
     // avoid double-counting a container whose repeated children are
     // themselves individually trivial (icons, single spans)
-    if (container.children[0].textContent?.trim().length === 0) return;
+    if (!boundedText(container.children[0], 1).text) return;
     seen.add(container);
-    const { selector } = buildSelector(container, doc);
-    collections.push({
-      key: selector,
-      selector,
-      label: nearbyLabel(container),
-      count: container.children.length,
-      sampleRows: Array.from(container.children)
-        .slice(0, MAX_SAMPLE_ROWS)
-        .map((item) => [normalizeText(item.textContent ?? '').slice(0, MAX_ATOM_LEN)]),
-    });
+    candidates.push({ el: container, kind: 'repeat', rows: Array.from(container.children) });
   });
 
-  return collections;
+  return candidates;
+}
+
+function toCollectionInfo(doc: Document, candidate: CollectionCandidate): CollectionInfo {
+  const { el, kind, rows } = candidate;
+  const { selector } = buildSelector(el, doc);
+  const info: CollectionInfo = {
+    key: selector,
+    selector,
+    label: nearbyLabel(el),
+    count: rows.length,
+    sampleRows: [],
+  };
+  if (kind === 'table') {
+    const headerCells = Array.from(el.querySelectorAll('thead th, thead td'));
+    const columns = headerCells.map((c) => boundedText(c, MAX_ATOM_LEN).text);
+    info.columns = columns.length ? columns : undefined;
+    info.sampleRows = rows
+      .slice(0, MAX_SAMPLE_ROWS)
+      .map((row) => Array.from(row.querySelectorAll('td')).map((cell) => boundedText(cell, MAX_ATOM_LEN).text));
+    info.rowKeyHint = guessKeyColumn(columns);
+  } else {
+    info.sampleRows = rows.slice(0, MAX_SAMPLE_ROWS).map((item) => [boundedText(item, MAX_ATOM_LEN).text]);
+  }
+  return info;
+}
+
+/** Past the cap (or the selector budget), the largest collections are kept -
+ * on a long page that is the feed or results list, not the hundreds of tag
+ * lists inside its cards. Listed in document order. */
+function extractCollections(doc: Document): { collections: CollectionInfo[]; total: number } {
+  const deadline = performance.now() + COLLECTIONS_BUDGET_MS;
+  const candidates = findCollectionCandidates(doc);
+  const largestFirst = [...candidates]
+    .sort((a, b) => b.rows.length - a.rows.length)
+    .slice(0, MAX_COLLECTIONS);
+  const built = new Map<CollectionCandidate, CollectionInfo>();
+  for (const candidate of largestFirst) {
+    if (built.size > 0 && performance.now() > deadline) break;
+    built.set(candidate, toCollectionInfo(doc, candidate));
+  }
+  const collections = candidates.flatMap((c) => {
+    const info = built.get(c);
+    return info ? [info] : [];
+  });
+  return { collections, total: candidates.length };
 }
 
 function guessKeyColumn(columns: string[]): string | undefined {
@@ -145,24 +190,49 @@ function nearbyLabel(el: Element): string | undefined {
   const labelledBy = el.getAttribute('aria-labelledby');
   if (labelledBy) {
     const label = el.ownerDocument.getElementById(labelledBy);
-    if (label?.textContent) return normalizeText(label.textContent);
+    const text = label ? boundedText(label, MAX_ATOM_LEN).text : '';
+    if (text) return text;
   }
   const ariaLabel = el.getAttribute('aria-label');
   if (ariaLabel) return normalizeText(ariaLabel);
   const heading = el.previousElementSibling;
   if (heading && /^H[1-6]$/.test(heading.tagName)) {
-    return normalizeText(heading.textContent ?? '');
+    return boundedText(heading, MAX_ATOM_LEN).text;
   }
   return undefined;
 }
 
-function extractControls(doc: Document): ControlInfo[] {
+/**
+ * Up to `max` of `els`: those on screen first, then the rest from the top.
+ * What the user is looking at is what an action changed.
+ */
+function onScreenFirst(els: Element[], max: number, doc: Document): Element[] {
+  if (els.length <= max) return els;
+  const width = doc.defaultView?.innerWidth ?? 0;
+  const height = doc.defaultView?.innerHeight ?? 0;
+  const onScreen: Element[] = [];
+  const offScreen: Element[] = [];
+  for (const el of els) {
+    if (onScreen.length >= max) break;
+    const rect = el.getBoundingClientRect();
+    const visible =
+      rect.width > 0 && rect.height > 0 && rect.bottom > 0 && rect.right > 0 && rect.top < height && rect.left < width;
+    if (visible) onScreen.push(el);
+    else if (offScreen.length < max) offScreen.push(el);
+  }
+  return onScreen.concat(offScreen).slice(0, max);
+}
+
+function extractControls(doc: Document): { controls: ControlInfo[]; total: number } {
+  const deadline = performance.now() + CONTROLS_BUDGET_MS;
   const selectorForRole = CONTROL_ROLES.map((r) => `[role="${r}"]`).join(',');
-  const nodes = doc.querySelectorAll(
-    `button, a[href], input, select, textarea, [role="tab"], ${selectorForRole}`,
+  const nodes = Array.from(
+    doc.querySelectorAll(`button, a[href], input, select, textarea, [role="tab"], ${selectorForRole}`),
   );
-  const controls: ControlInfo[] = [];
-  nodes.forEach((el) => {
+  const order = new Map(nodes.map((el, i) => [el, i]));
+  const built: { index: number; control: ControlInfo }[] = [];
+  for (const el of onScreenFirst(nodes, MAX_CONTROLS, doc)) {
+    if (built.length >= MIN_CONTROLS && performance.now() > deadline) break;
     const r = el.tagName === 'INPUT' ? inputRole(el as HTMLInputElement) : role(el) || 'generic';
     const { selector } = buildSelector(el, doc);
     const name = computeAccessibleName(el);
@@ -186,14 +256,15 @@ function extractControls(doc: Document): ControlInfo[] {
     if (el.hasAttribute('aria-selected')) {
       control.selected = el.getAttribute('aria-selected') === 'true';
     }
-    controls.push(control);
-  });
-  return controls;
+    built.push({ index: order.get(el) ?? 0, control });
+  }
+  const controls = built.sort((a, b) => a.index - b.index).map((b) => b.control);
+  return { controls, total: nodes.length };
 }
 
 function extractCounters(doc: Document): Record<string, number> {
   const counters: Record<string, number> = {};
-  const text = doc.body.textContent ?? '';
+  const { text } = boundedText(doc.body, MAX_COUNTER_TEXT);
   // "24 results", "Showing 1-10 of 24"
   const resultsRe = /\b(\d+)\s+(results?|items?|records?|rows?)\b/gi;
   let match;
@@ -214,13 +285,16 @@ function extractCounters(doc: Document): Record<string, number> {
 function extractAtoms(doc: Document): { textAtoms: string[]; hiddenAtoms: string[] } {
   const textAtoms = new Set<string>();
   const hiddenAtoms = new Set<string>();
+  let walked = 0;
 
   // Plain recursive walk rather than `TreeWalker` + `NodeFilter.SHOW_TEXT`:
   // portable across environments where that combination is unreliable
   // (notably happy-dom, used by this file's own tests).
   function visit(node: Node) {
     if (textAtoms.size >= MAX_TEXT_ATOMS && hiddenAtoms.size >= MAX_TEXT_ATOMS) return;
+    if (walked >= MAX_ATOM_WALK) return;
     if (node.nodeType === 3 /* TEXT_NODE */) {
+      walked += 1;
       const value = normalizeText(node.textContent ?? '');
       if (!value || value.length > MAX_ATOM_LEN) return;
       const parent = node.parentElement;
@@ -234,7 +308,7 @@ function extractAtoms(doc: Document): { textAtoms: string[]; hiddenAtoms: string
       return;
     }
     if (node.nodeType !== 1 /* ELEMENT_NODE */) return;
-    for (const child of Array.from(node.childNodes)) visit(child);
+    for (let child = node.firstChild; child; child = child.nextSibling) visit(child);
   }
 
   visit(doc.body);
@@ -242,52 +316,62 @@ function extractAtoms(doc: Document): { textAtoms: string[]; hiddenAtoms: string
 }
 
 function extractHeadings(doc: Document): string[] {
-  return Array.from(doc.querySelectorAll('h1, h2, h3'))
-    .map((h) => normalizeText(h.textContent ?? ''))
-    .filter(Boolean)
-    .slice(0, 30);
+  const headings: string[] = [];
+  for (const h of Array.from(doc.querySelectorAll('h1, h2, h3'))) {
+    if (headings.length >= MAX_HEADINGS) break;
+    const text = boundedText(h, MAX_ATOM_LEN).text;
+    if (text) headings.push(text);
+  }
+  return headings;
 }
 
-function extractLandmarks(doc: Document): { role: string; name?: string }[] {
+function extractLandmarks(doc: Document): { landmarks: { role: string; name?: string }[]; total: number } {
   const selector =
     'nav, main, header, footer, aside, [role="navigation"], [role="main"], [role="banner"], [role="contentinfo"], [role="tablist"], [role="dialog"]';
-  return Array.from(doc.querySelectorAll(selector)).map((el) => ({
+  const nodes = Array.from(doc.querySelectorAll(selector));
+  const landmarks = nodes.slice(0, MAX_LANDMARKS).map((el) => ({
     role: role(el) || el.tagName.toLowerCase(),
     name: computeAccessibleName(el) || undefined,
   }));
+  return { landmarks, total: nodes.length };
 }
 
 function extractStatus(
   doc: Document,
 ): { role: 'alert' | 'status' | 'dialog' | 'toast'; text: string }[] {
   const out: { role: 'alert' | 'status' | 'dialog' | 'toast'; text: string }[] = [];
-  doc.querySelectorAll('[role="alert"], [role="status"]').forEach((el) => {
-    const text = normalizeText(el.textContent ?? '');
+  for (const el of Array.from(doc.querySelectorAll('[role="alert"], [role="status"]')).slice(0, MAX_STATUS)) {
+    const { text } = boundedText(el, MAX_STATUS_LEN);
     if (text) out.push({ role: el.getAttribute('role') as 'alert' | 'status', text });
-  });
-  doc.querySelectorAll('[role="dialog"], dialog[open]').forEach((el) => {
-    const text = normalizeText(el.textContent ?? '').slice(0, MAX_ATOM_LEN);
+  }
+  for (const el of Array.from(doc.querySelectorAll('[role="dialog"], dialog[open]')).slice(0, MAX_STATUS)) {
+    const { text } = boundedText(el, MAX_ATOM_LEN);
     if (text) out.push({ role: 'dialog', text });
-  });
+  }
   return out;
 }
 
 export function buildDigest(doc: Document, route: string): UIDigest {
-  const collections = extractCollections(doc);
-  const controls = extractControls(doc);
+  const { collections, total: collectionTotal } = extractCollections(doc);
+  const { controls, total: controlTotal } = extractControls(doc);
+  const { landmarks, total: landmarkTotal } = extractLandmarks(doc);
   const { textAtoms, hiddenAtoms } = extractAtoms(doc);
   const hashInput = JSON.stringify({
     collections: collections.map((c) => [c.key, c.count]),
-    controlCount: controls.length,
+    controlCount: controlTotal,
     textAtoms,
   });
+  const truncated: NonNullable<UIDigest['truncated']> = {};
+  if (controlTotal > controls.length) truncated.controls = controlTotal;
+  if (collectionTotal > collections.length) truncated.collections = collectionTotal;
+  if (landmarkTotal > landmarks.length) truncated.landmarks = landmarkTotal;
   return {
     url: doc.location?.href ?? '',
     route,
     title: doc.title,
     capturedAt: Date.now(),
     headings: extractHeadings(doc),
-    landmarks: extractLandmarks(doc),
+    landmarks,
     collections,
     controls,
     status: extractStatus(doc),
@@ -295,6 +379,8 @@ export function buildDigest(doc: Document, route: string): UIDigest {
     textAtoms,
     hiddenAtoms,
     digestHash: fnv1a(hashInput),
+    elementCount: doc.getElementsByTagName('*').length,
+    ...(Object.keys(truncated).length ? { truncated } : {}),
   };
 }
 

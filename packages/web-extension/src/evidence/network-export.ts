@@ -23,6 +23,11 @@ function contentKey(req: NetworkRequest): string {
  * extension's own inject.js another 210 KB) and nobody reads them. */
 const PAYLOAD_RESOURCE_TYPES = new Set(['fetch', 'xhr', 'document', 'other']);
 
+/** Whether requests of this CDP resource type carry API data worth a body. */
+export function isPayloadResourceType(resourceType: string | undefined): boolean {
+  return PAYLOAD_RESOURCE_TYPES.has((resourceType ?? 'other').toLowerCase());
+}
+
 /** A request whose payload is kept in the index. `noise`-tier requests were
  * excluded by a settings rule, so their bodies are never wanted; non-API
  * resource types carry code and assets, not data. The entry itself - method,
@@ -31,8 +36,7 @@ const PAYLOAD_RESOURCE_TYPES = new Set(['fetch', 'xhr', 'document', 'other']);
  * reads the undeduped bundle. */
 export function keepsPayload(req: NetworkRequest): boolean {
   if (req.tier === 'noise') return false;
-  const type = (req.resourceType ?? 'other').toLowerCase();
-  return PAYLOAD_RESOURCE_TYPES.has(type);
+  return isPayloadResourceType(req.resourceType);
 }
 
 export function serializeNetwork(requests: NetworkRequest[]): unknown[] {

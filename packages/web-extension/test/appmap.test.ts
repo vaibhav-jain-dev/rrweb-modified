@@ -20,6 +20,16 @@ describe('mergeIntoAppMap', () => {
     expect(map.nodes.some((n) => n.kind === 'table')).toBe(true);
   });
 
+  it('caps each kind on a long page but still sees every kind', () => {
+    const lists = Array.from({ length: 150 }, (_, i) => `<ul><li>tag ${i}</li><li>tag b</li></ul>`).join('');
+    render(`${lists}<div role="dialog">Confirm</div>`);
+    const nodes = extractAppMapNodes(document, '/feed', 1);
+    const listCount = nodes.filter((n) => n.kind === 'list').length;
+    expect(listCount).toBeGreaterThanOrEqual(5);
+    expect(listCount).toBeLessThanOrEqual(100);
+    expect(nodes.some((n) => n.kind === 'dialog')).toBe(true);
+  });
+
   it('identifies a tab nested inside another tab context as nested-tab', () => {
     render(`
       <div role="tab">

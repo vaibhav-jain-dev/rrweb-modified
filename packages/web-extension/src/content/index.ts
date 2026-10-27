@@ -68,7 +68,7 @@ async function initMainPage() {
   channel.provide(ServiceName.CaptureDigest, () => {
     const requestId = nanoid();
     window.postMessage(
-      { message: MessageName.CaptureDigestRequest, requestId },
+      { message: MessageName.CaptureDigestRequest, requestId, sentAt: Date.now() },
       location.origin,
     );
     return new Promise((resolve) => {

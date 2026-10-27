@@ -146,6 +146,14 @@ export type UIDigest = {
   textAtoms: string[];
   hiddenAtoms: string[];
   digestHash: string;
+  /** Elements in the document when captured. */
+  elementCount?: number;
+  /**
+   * Present only when the page had more than the digest lists: the total
+   * found for each capped list. Capped controls keep the ones on screen
+   * first; capped collections keep the largest.
+   */
+  truncated?: { controls?: number; collections?: number; landmarks?: number };
 };
 
 export type UIDiff = {

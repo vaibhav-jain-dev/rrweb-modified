@@ -80,6 +80,51 @@ describe('buildDigest', () => {
   });
 });
 
+describe('buildDigest on a long page', () => {
+  function onScreen(el: Element) {
+    Object.defineProperty(el, 'getBoundingClientRect', {
+      value: () => ({ x: 0, y: 10, width: 50, height: 10, top: 10, left: 0, right: 50, bottom: 20 }),
+    });
+  }
+
+  it('records the page size and leaves `truncated` off a page within the caps', () => {
+    render(TABLE_24(5));
+    const digest = buildDigest(document, '/x');
+    expect(digest.elementCount).toBe(document.getElementsByTagName('*').length);
+    expect(digest.truncated).toBeUndefined();
+  });
+
+  it('caps controls, keeps the ones on screen and reports the total', () => {
+    render(Array.from({ length: 400 }, (_, i) => `<button>Item ${i}</button>`).join(''));
+    const buttons = Array.from(document.querySelectorAll('button'));
+    buttons.slice(390, 395).forEach(onScreen);
+    const digest = buildDigest(document, '/feed');
+    expect(digest.controls.length).toBeLessThanOrEqual(300);
+    expect(digest.truncated?.controls).toBe(400);
+    const names = digest.controls.map((c) => c.name);
+    for (let i = 390; i < 395; i++) expect(names).toContain(`Item ${i}`);
+    // still in document order
+    expect(names.indexOf('Item 390')).toBeGreaterThan(names.indexOf('Item 0'));
+  });
+
+  it('keeps the largest collections when there are too many', () => {
+    const small = Array.from({ length: 60 }, () => '<ul><li>tag a</li><li>tag b</li></ul>').join('');
+    const feed = `<ul id="feed">${Array.from({ length: 30 }, (_, i) => `<li>Post ${i}</li>`).join('')}</ul>`;
+    render(small + feed);
+    const digest = buildDigest(document, '/feed');
+    expect(digest.truncated?.collections).toBe(61);
+    expect(digest.collections.some((c) => c.selector === '#feed' && c.count === 30)).toBe(true);
+  });
+
+  it('counts every control in the hash, not only the listed ones', () => {
+    render(Array.from({ length: 400 }, (_, i) => `<button>Item ${i}</button>`).join(''));
+    const before = buildDigest(document, '/feed');
+    document.body.insertAdjacentHTML('beforeend', '<button>Item 400</button>');
+    const after = buildDigest(document, '/feed');
+    expect(after.digestHash).not.toBe(before.digestHash);
+  });
+});
+
 describe('diffDigests', () => {
   it('reports a row-count change in the requested "24 -> 7" shape', () => {
     render(TABLE_24(24));

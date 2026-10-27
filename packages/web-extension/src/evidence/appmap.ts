@@ -8,7 +8,16 @@
  */
 import { computeAccessibleName, computeVisibility } from './accname';
 import { buildSelector } from './selector';
+import { boundedText } from './text';
 import type { AppMap, AppMapEdge, AppMapNode, AppMapNodeKind, VisibilityState } from './types';
+
+/** Per kind. A long page repeats the same lists and links hundreds of times,
+ * and each node costs a selector checked against the whole document. */
+const MAX_NODES_PER_KIND = 100;
+/** Past this, each kind gets only its first MIN_NODES_PER_KIND, so a huge
+ * page can't hold the main thread on one extraction. */
+const SELECTOR_BUDGET_MS = 40;
+const MIN_NODES_PER_KIND = 5;
 
 function nodeId(kind: AppMapNodeKind, route: string, selector: string): string {
   return `${kind}:${route}:${selector}`;
@@ -30,14 +39,20 @@ export function extractAppMapNodes(
   actionSeq: number,
 ): AppMapNode[] {
   const nodes: AppMapNode[] = [];
+  const countByKind = new Map<AppMapNodeKind, number>();
+  const deadline = performance.now() + SELECTOR_BUDGET_MS;
 
   function push(kind: AppMapNodeKind, el: Element, parentSelector?: string) {
+    const count = countByKind.get(kind) ?? 0;
+    if (count >= MAX_NODES_PER_KIND) return;
+    if (count >= MIN_NODES_PER_KIND && performance.now() > deadline) return;
+    countByKind.set(kind, count + 1);
     const { selector } = buildSelector(el, doc);
     const state: VisibilityState = computeVisibility(el);
     nodes.push({
       kind,
       id: nodeId(kind, route, selector),
-      label: el.textContent?.trim().slice(0, 100) || undefined,
+      label: boundedText(el, 100).text || undefined,
       accessibleName: computeAccessibleName(el) || undefined,
       selector,
       parentId: parentSelector ? nodeId('nav-item', route, parentSelector) : undefined,

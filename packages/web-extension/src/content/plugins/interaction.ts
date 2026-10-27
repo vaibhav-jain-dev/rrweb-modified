@@ -13,6 +13,7 @@
 import type { IMirror, IWindow, RecordPlugin } from '@rrweb/types';
 import { computeAccessibleName } from '~/evidence/accname';
 import { buildSelector } from '~/evidence/selector';
+import { boundedText } from '~/evidence/text';
 import { shouldMaskInput, redactValueShapes } from '~/evidence/redact';
 import type { ActionRecord, ActionType, TargetInfo } from '~/evidence/types';
 import { INTERACTION_PLUGIN_NAME } from '~/evidence/plugin-names';
@@ -63,7 +64,8 @@ function buildTargetInfo(
     maskSelectors,
     (selectors) => selectors.some((s) => el.matches(s)),
   );
-  const text = masked ? undefined : el.textContent?.trim().slice(0, 200) || undefined;
+  // Bounded: a page scroll's target is <html>, whose full text is the page.
+  const text = masked ? undefined : boundedText(el, 200).text || undefined;
   return {
     rrwebId: rrwebId !== undefined && rrwebId >= 0 ? rrwebId : undefined,
     selector,

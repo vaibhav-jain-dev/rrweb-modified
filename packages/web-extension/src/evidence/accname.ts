@@ -7,6 +7,11 @@
  *
  * Order follows the accname spec's precedence.
  */
+import { boundedText } from './text';
+
+/** Longer names are page content, not a label; reading them in full is
+ * what made a name for `role="feed"` or `<html>` cost a whole-page walk. */
+const MAX_NAME_LEN = 200;
 
 export function computeAccessibleName(el: Element): string {
   const labelledBy = el.getAttribute('aria-labelledby');
@@ -14,7 +19,10 @@ export function computeAccessibleName(el: Element): string {
     const doc = el.ownerDocument;
     const text = labelledBy
       .split(/\s+/)
-      .map((id) => doc?.getElementById(id)?.textContent?.trim() ?? '')
+      .map((id) => {
+        const labelEl = doc?.getElementById(id);
+        return labelEl ? boundedText(labelEl, MAX_NAME_LEN).text : '';
+      })
       .filter(Boolean)
       .join(' ');
     if (text) return normalize(text);
@@ -34,8 +42,8 @@ export function computeAccessibleName(el: Element): string {
   }
 
   if (['BUTTON', 'A', 'SUMMARY'].includes(el.tagName) || el.getAttribute('role')) {
-    const text = el.textContent?.trim();
-    if (text) return normalize(text);
+    const { text } = boundedText(el, MAX_NAME_LEN);
+    if (text) return text;
   }
 
   const title = el.getAttribute('title');
@@ -44,8 +52,8 @@ export function computeAccessibleName(el: Element): string {
   const placeholder = el.getAttribute('placeholder');
   if (placeholder?.trim()) return normalize(placeholder);
 
-  const text = el.textContent?.trim();
-  if (text && text.length <= 120) return normalize(text);
+  const { text, truncated } = boundedText(el, 120);
+  if (text && !truncated) return text;
 
   return '';
 }
@@ -58,11 +66,12 @@ function findAssociatedLabel(el: Element): string | undefined {
   const id = el.id;
   if (id) {
     const label = el.ownerDocument?.querySelector(`label[for=${JSON.stringify(id)}]`);
-    if (label?.textContent) return label.textContent.trim();
+    const forText = label ? boundedText(label, MAX_NAME_LEN).text : '';
+    if (forText) return forText;
   }
   const wrappingLabel = el.closest('label');
-  if (wrappingLabel?.textContent) return wrappingLabel.textContent.trim();
-  return undefined;
+  const wrappingText = wrappingLabel ? boundedText(wrappingLabel, MAX_NAME_LEN).text : '';
+  return wrappingText || undefined;
 }
 
 function normalize(text: string): string {

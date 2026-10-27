@@ -12,6 +12,7 @@ import {
   redactUrl,
   type RedactionReport,
 } from '~/evidence/redact';
+import { isPayloadResourceType } from '~/evidence/network-export';
 import type { NetworkRequest } from '~/evidence/types';
 
 const MAX_BODY_BYTES = 256 * 1024;
@@ -116,7 +117,10 @@ export function attachNetworkCapture(
 
     let responseBody: string | null = null;
     let bodyTruncated = false;
-    if (!failed) {
+    // Image, script, font and stylesheet bodies are dropped at export
+    // anyway; an image-heavy feed would otherwise pull every one of them
+    // through the debugger connection.
+    if (!failed && isPayloadResourceType(req.resourceType)) {
       const bodyResult = await sendCommand<{ body: string; base64Encoded: boolean }>(
         tabId,
         'Network.getResponseBody',

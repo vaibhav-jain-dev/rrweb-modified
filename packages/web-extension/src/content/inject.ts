@@ -25,6 +25,17 @@ import { extractAppMapNodes } from '~/evidence/appmap';
 
 let stopFn: (() => void) | null = null;
 
+/** The content script stops waiting for a digest after 5s; one requested
+ * longer ago than this would only block the page for an answer nobody reads. */
+const STALE_DIGEST_REQUEST_MS = 4000;
+
+/** Run when the page's main thread is free (input, rendering and the app's
+ * own work first), but no later than `timeout`. */
+function whenIdle(fn: () => void, timeout: number) {
+  if (typeof window.requestIdleCallback === 'function') window.requestIdleCallback(fn, { timeout });
+  else setTimeout(fn, 0);
+}
+
 function buildPlugins(evidenceConfig: EvidenceCaptureConfig): RecordPlugin[] {
   const plugins: RecordPlugin[] = [
     getRecordInteractionPlugin({ maskSelectors: evidenceConfig.maskSelectors }) as RecordPlugin,
@@ -64,6 +75,7 @@ const messageHandler = (
     config?: recordOptions<eventWithTime>;
     evidenceConfig?: EvidenceCaptureConfig;
     requestId?: string;
+    sentAt?: number;
   }>,
 ) => {
   if (event.source !== window) return;
@@ -87,19 +99,22 @@ const messageHandler = (
       window.removeEventListener('message', messageHandler);
     },
     [MessageName.CaptureDigestRequest]: () => {
-      // route is passed as-is (pathname + search); a real router's
-      // notion of "route" (with param placeholders) isn't reachable
-      // generically from outside the app, so the URL path is the
-      // portable choice here.
-      const route = location.pathname + location.search;
-      const digest = buildDigest(document, route);
-      const appMapNodes = extractAppMapNodes(document, route, 0);
-      postMessage({
-        message: MessageName.CaptureDigestResponse,
-        requestId: data.requestId,
-        digest,
-        appMapNodes,
-      });
+      whenIdle(() => {
+        if (data.sentAt !== undefined && Date.now() - data.sentAt > STALE_DIGEST_REQUEST_MS) return;
+        // route is passed as-is (pathname + search); a real router's
+        // notion of "route" (with param placeholders) isn't reachable
+        // generically from outside the app, so the URL path is the
+        // portable choice here.
+        const route = location.pathname + location.search;
+        const digest = buildDigest(document, route);
+        const appMapNodes = extractAppMapNodes(document, route, 0);
+        postMessage({
+          message: MessageName.CaptureDigestResponse,
+          requestId: data.requestId,
+          digest,
+          appMapNodes,
+        });
+      }, 1000);
     },
   } as Record<MessageName, () => void>;
   if (eventHandler[data.message]) eventHandler[data.message]();

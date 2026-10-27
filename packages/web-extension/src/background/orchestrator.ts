@@ -34,6 +34,14 @@ import type { SettleResult } from './export/build';
 
 const FLUSH_INTERVAL_MS = 500;
 const FLUSH_MAX_BUFFER = 200;
+/**
+ * Accessibility.getFullAXTree builds Chrome's whole AX tree on the page's
+ * main thread and ships it here as JSON. Measured in Chromium: 4k elements
+ * blocked the page for ~70ms (4 MB), 14k for ~300ms (14 MB), 42k for ~1s
+ * (43 MB) - on a long page, after every action. Past this size the AX
+ * cross-check is skipped.
+ */
+const AX_MAX_ELEMENTS = 4000;
 
 let channelRef: Channel | undefined;
 export function initOrchestrator(channel: Channel) {
@@ -179,7 +187,7 @@ function onActionDetected(s: State, action: ActionRecord) {
   s.buffers.action.push(action);
   maybeEagerFlush(s);
 
-  const work = captureSettleEvidence(s, seq, action.t).catch((err: unknown) => {
+  const work = captureSettleEvidence(s, seq, action).catch((err: unknown) => {
     console.warn('[evidence] settle capture failed', err);
   });
   s.settleWork.push(work);
@@ -199,14 +207,17 @@ function maybeEagerFlush(s: State) {
   if (total >= FLUSH_MAX_BUFFER) void flush();
 }
 
-async function captureSettleEvidence(s: State, actionSeq: number, actionT: number) {
+async function captureSettleEvidence(s: State, actionSeq: number, action: ActionRecord) {
+  const actionT = action.t;
   const { settledAt, superseded } = await s.settleTracker.waitForSettle(actionT);
 
   // Captures for a burst of actions (rapid clicks, typing, scrolling) would
   // otherwise all start at once - each superseded wait resolves the instant
   // the next action arrives. Running them one at a time keeps the AX dump
   // and screenshot work from piling up on the recorded page.
-  const run = s.captureChain.then(() => captureSettled(s, actionSeq, actionT, settledAt, superseded));
+  const run = s.captureChain.then(() =>
+    captureSettled(s, actionSeq, actionT, settledAt, superseded, action.type === 'scroll'),
+  );
   s.captureChain = run.catch(() => undefined);
   await run;
 }
@@ -217,6 +228,7 @@ async function captureSettled(
   actionT: number,
   settledAt: number,
   superseded: boolean,
+  isScroll: boolean,
 ) {
   const digestPayload = channelRef
     ? ((await channelRef
@@ -238,8 +250,12 @@ async function captureSettled(
   // read-only digest above is still kept so every action has one.
   if (!superseded) {
     // Accessibility.getFullAXTree makes Chrome build the whole AX tree on the
-    // page's main thread, so only redo it when the UI actually changed.
-    if (s.cdpAttached && uiChanged) {
+    // page's main thread, so only redo it when the UI actually changed, on a
+    // page small enough for that to be quick, and not for a scroll: it
+    // doesn't change what is accessible, and on an infinite list every
+    // scroll changes the UI.
+    const pageSize = digestPayload.digest.elementCount ?? 0;
+    if (s.cdpAttached && uiChanged && !isScroll && pageSize <= AX_MAX_ELEMENTS) {
       axIgnoredSelectors = Array.from(await captureAxIgnoredSelectors(s.tabId));
       s.lastAxIgnoredSelectors = axIgnoredSelectors;
     }

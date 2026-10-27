@@ -5,6 +5,8 @@
  * one element, because a selector nobody can trust is worse than none.
  */
 
+import { boundedText } from './text';
+
 const TEST_ID_ATTRS = ['data-testid', 'data-test', 'data-cy', 'data-qa'];
 
 /** attrs that make reasonable, stable selector fragments */
@@ -17,8 +19,11 @@ function cssEscape(value: string): string {
 
 function isUnique(doc: ParentNode, selector: string, el: Element): boolean {
   try {
-    const matches = doc.querySelectorAll(selector);
-    return matches.length === 1 && matches[0] === el;
+    // querySelector stops at the first match, so a selector that first
+    // matches some other element is rejected without scanning the rest of a
+    // long page; only a selector that could be unique pays for the full count.
+    if (doc.querySelector(selector) !== el) return false;
+    return doc.querySelectorAll(selector).length === 1;
   } catch {
     return false;
   }
@@ -150,11 +155,12 @@ function findAssociatedLabel(el: Element): string | undefined {
   const id = el.id;
   if (id) {
     const label = el.ownerDocument?.querySelector(`label[for=${JSON.stringify(id)}]`);
-    if (label?.textContent) return label.textContent.trim();
+    const forText = label ? boundedText(label, 200).text : '';
+    if (forText) return forText;
   }
   const wrappingLabel = el.closest('label');
-  if (wrappingLabel?.textContent) return wrappingLabel.textContent.trim();
-  return undefined;
+  const wrappingText = wrappingLabel ? boundedText(wrappingLabel, 200).text : '';
+  return wrappingText || undefined;
 }
 
 const IMPLICIT_ROLES: Record<string, string> = {
@@ -183,7 +189,7 @@ function implicitRole(el: Element): string | undefined {
 function accessibleNameHint(el: Element): string | undefined {
   const ariaLabel = el.getAttribute('aria-label');
   if (ariaLabel) return ariaLabel.trim();
-  const text = el.textContent?.trim();
-  if (text && text.length <= 80) return text;
+  const { text, truncated } = boundedText(el, 80);
+  if (text && !truncated) return text;
   return undefined;
 }
