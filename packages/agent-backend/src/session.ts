@@ -5,15 +5,24 @@ import type {
   RequestDetail,
 } from '../../web-extension/src/agent/protocol.ts';
 import { renderAgentLog } from '../../web-extension/src/agent/log.ts';
+import { isMutatingMethod } from '../../web-extension/src/agent/protocol.ts';
 import type { PlaybookDef } from './config/types.ts';
 import { toRequestRecord } from './endpoint.ts';
 import { Lane } from './lane.ts';
 import type { ModelClient } from './model/types.ts';
-import type { RequestRecord } from './sources/types.ts';
+import type { RequestRecord, ToolContext } from './sources/types.ts';
 import type { ToolRegistry } from './tools/registry.ts';
 
 const MAX_REQUESTS = 400;
 
+export type RequestSummary = {
+  requestId: string;
+  endpoint: string;
+  url: string;
+  status?: number;
+  /** Milliseconds from session start. */
+  tRel: number;
+};
 const EMIT_DEBOUNCE_MS = 150;
 
 export type SessionOptions = {
@@ -125,6 +134,22 @@ export class SessionRuntime {
       lane = this.adhoc;
     }
     return lane.ask(text);
+  }
+
+  /** What a lookup run from outside a lane (MCP) sees of this session. */
+  toolContext(): ToolContext {
+    return { requests: this.requests };
+  }
+
+  /** The newest requests first, one summary each; bodies via `requestDetail`. */
+  requestList(limit: number, writesOnly: boolean): RequestSummary[] {
+    const out: RequestSummary[] = [];
+    for (let i = this.requests.length - 1; i >= 0 && out.length < limit; i--) {
+      const r = this.requests[i];
+      if (writesOnly && !isMutatingMethod(r.method)) continue;
+      out.push({ requestId: r.requestId, endpoint: r.endpoint, url: r.url, status: r.status, tRel: r.tRel });
+    }
+    return out;
   }
 
   requestDetail(requestId: string): RequestDetail | undefined {

@@ -1,5 +1,6 @@
 import type { eventWithTime } from '@rrweb/types';
 import type { AgentConfig } from './agent/protocol';
+import type { AgentMarker } from './agent/markers';
 
 export enum SyncDataKey {
   settings = 'settings',
@@ -100,6 +101,8 @@ export type Session = {
   createTimestamp: number;
   modifyTimestamp: number;
   recorderVersion: string;
+  /** The live agent's decided checks, drawn on the Player's timeline. */
+  agentMarkers?: AgentMarker[];
 };
 
 // all service names for channel

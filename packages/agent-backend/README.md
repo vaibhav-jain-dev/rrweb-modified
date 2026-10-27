@@ -128,6 +128,23 @@ Replays a recording's calls through the rules (read-only). Rules marked `soft`
 in the shipped playbook are the ones whose stored shape is not yet confirmed
 against live data; probe is how to confirm them. Exit code 1 if any check failed.
 
+## From Claude Code (MCP)
+
+The backend is also an MCP server, on the same port:
+
+```
+claude mcp add --transport http rrweb-agent http://127.0.0.1:47821/mcp
+# with AGENT_TOKEN set: add  --header "x-agent-token: <token>"
+```
+
+While you record, it can follow along: `sessions`, `ledger` (the checks as a
+log, or the full JSON), `requests` / `request` (what the app called, bodies cut
+at 4 KB), and `lookup`, which runs one of the named tools in `sources.yaml`.
+The same rules apply as for a playbook: read-only, typed arguments, only the
+projected fields come back. Each ledger is also a resource,
+`session://<id>/ledger`. Web pages cannot reach it: a request with a foreign
+`Origin`, or (on loopback) a foreign `Host`, is refused.
+
 ## Replaying a recording
 
 To repeat a recording rather than watch one, see `packages/replay-mcp`. Its
@@ -155,7 +172,7 @@ extra work on the page: it forwards network records it already captured.
 ## Tests
 
 ```
-yarn agent:test                       # 101 tests, no services needed
+yarn agent:test                       # 105 tests, no services needed
 docker run --rm -d --name agent-e2e-mongo mongo:5.0      # then, with its IP:
 AGENT_E2E_MONGO_URI=mongodb://<ip>:27017/ yarn agent:test mongo.e2e   # +11 against a real MongoDB
 ```
@@ -171,6 +188,7 @@ src/session.ts       per-recording state           src/expr.ts      references, 
 src/sources/         mongo · http · session        src/config/      sources.yaml + playbook parsing
 src/tools/registry   named tools, typed arguments  src/cli.ts       probe, learn
 src/model/           ollama (1 in flight, GPU)     src/recording.ts reads recording-*.zip
+src/mcp.ts           MCP over http at /mcp
 ```
 
 The wire types and the narrative renderer are shared with the extension

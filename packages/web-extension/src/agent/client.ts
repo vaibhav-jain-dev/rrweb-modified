@@ -24,6 +24,8 @@ export const MAX_BUFFERED = 500;
 const RECONNECT_MIN_MS = 1_000;
 const RECONNECT_MAX_MS = 10_000;
 const RESULT_TIMEOUT_MS = 10_000;
+/** How long Stop waits when the socket is already down: one retry, not the full wait. */
+const LOST_RESULT_TIMEOUT_MS = 3_000;
 
 export type StatusUpdate = {
   state: 'connecting' | 'connected' | 'lost' | 'finished';
@@ -63,6 +65,7 @@ export type AgentClient = {
   lastLedger(): Ledger | undefined;
 };
 
+const CONNECTING = 0;
 const OPEN = 1;
 
 export function toWebSocketUrl(config: AgentConfig): string | undefined {
@@ -259,10 +262,11 @@ export function createAgentClient(
         });
         return undefined;
       }
+      const connected = isOpen();
       const finished = new Promise<AgentResult | undefined>((resolve) => {
         const timer = deps.setTimer(
           () => resolve(undefined),
-          RESULT_TIMEOUT_MS,
+          connected ? RESULT_TIMEOUT_MS : LOST_RESULT_TIMEOUT_MS,
         );
         resolveResult = (r) => {
           deps.clearTimer(timer);
@@ -274,10 +278,15 @@ export function createAgentClient(
         sessionId: opts.sessionId,
         endedAt,
       };
-      if (isOpen()) raw(stopMsg);
+      if (connected) raw(stopMsg);
       else {
-        // Not connected right now: queue it so a reconnect within the timeout still delivers it.
+        // Not connected right now: queue it and retry at once rather than at
+        // the next backoff step, so a backend that is back still delivers
+        // the result and one that is gone holds the export only briefly.
         enqueue(stopMsg);
+        if (reconnectTimer !== undefined) deps.clearTimer(reconnectTimer);
+        reconnectTimer = undefined;
+        if (socket?.readyState !== CONNECTING) connect();
       }
       const got = await finished;
       shutdown();

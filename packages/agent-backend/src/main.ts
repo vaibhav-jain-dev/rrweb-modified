@@ -61,6 +61,7 @@ async function main(): Promise<void> {
   console.log(
     `agent-backend ${VERSION} listening on http://${addr.host}:${addr.port}`,
   );
+  console.log(`mcp: http://${addr.host}:${addr.port}/mcp`);
   console.log(`config: ${dir}`);
   console.log(
     `model: ${model?.name ?? 'none (rules only)'}   playbooks: ${

@@ -13,15 +13,20 @@
 > | Statuses `pending/observed/verified/failed/never_seen` | Adds `unchecked`: the source could not be asked. It is never reported as a failure. |
 > | – | `yarn agent:probe <zip>` replays a recording's writes through the rules against the database (read-only) to confirm rules against live documents; `--dry` shows the lookups only. |
 > | – | A full `AGENT_MONGO_URI` means `~/projects/.env.mongo` is never opened. |
-> | MCP adapter (phase 6) | Not built. The tool registry (`src/tools/registry.ts`) has the `{name, args, handler}` shape an MCP adapter needs; nothing else is wired. |
+> | MCP adapter (phase 6) | Streamable HTTP at `/mcp` on the backend's own port (`src/mcp.ts`), stateless. Tools `sessions`, `ledger`, `requests`, `request`, and one `lookup` over the registry rather than one MCP tool per named lookup; resource `session://{id}/ledger`. No `events` resource: `requests` covers what was asked for. Foreign `Origin` and (on loopback) foreign `Host` are refused; `AGENT_TOKEN` applies. |
 > | Firefox side panel | Chrome only; the Firefox build hides the live-agent UI. |
-> | Player timeline markers | Not built. Checks carry `actionSeq`, `tObserved`, `tResolved`, which is what markers need. |
+> | Player timeline markers | The evidence (and with it the ledger) is cleared after export, so Stop keeps a small `agentMarkers` list on the session; the Player turns each decided check into an rrweb custom event, colored by status, hover shows the result. `never_seen` has no moment and gets no mark. |
+> | Stop waits 10 s for the result | Still 10 s while connected; when the socket is already down at Stop it retries at once and waits 3 s, so a dead backend holds the export only briefly. |
 >
-> Verified: 101 backend tests + 187 extension tests; 11 more against a real
-> MongoDB (opt-in, `mongo.e2e`); `yarn build:chrome` bundles the side panel; the
-> CLI was run on a real recording. **Not** verified: the extension loaded in a
-> browser against a live backend (popup → side panel → zip), and any check
-> against `devlms` itself.
+> Verified: 105 backend tests + 204 extension tests; 11 more against a real
+> MongoDB (opt-in, `mongo.e2e`); the CLI was run on a real recording. The built
+> extension was driven in Chromium against a live backend and a seeded
+> throwaway MongoDB: popup lists the playbook, the agent connects, the side
+> panel shows verified and failed checks live, Stop puts `agent/ledger.json`,
+> `agent/log.txt` and `AGENT ▶` lines in the zip, and the Player shows the
+> marks. Killing the backend mid-recording still exports, with the ledger
+> marked incomplete. **Not** verified: any check against `devlms` itself, and
+> `chrome.sidePanel.open` from a real click (the panel was opened as a tab).
 
 A local model watches a recording as it happens, resolves a checklist the
 recorder chose up front, shows its progress in a side panel, and leaves a

@@ -21,8 +21,11 @@ import {
   appendEventChunk,
   createSession,
   finalizeSession,
+  getEvidenceItems,
   getSession,
 } from '~/utils/storage';
+import { agentMarkers } from '~/agent/markers';
+import type { AgentResult } from '~/agent/protocol';
 import {
   currentCaptureMode,
   handleEmittedEvent,
@@ -317,6 +320,12 @@ channel.on(EventName.StopButtonClicked, async () => {
             // ignore error
           })) ?? 'new session';
       const finishedSession = await renameSession(sessionId, title);
+      // Read before the export clears the evidence: the Player draws these.
+      if (evidenceSession) {
+        const agent = await getEvidenceItems<AgentResult>(evidenceSession.id, 'agent').catch(() => []);
+        const markers = agent.length ? agentMarkers(agent[agent.length - 1].ledger) : [];
+        if (markers.length) finishedSession.agentMarkers = markers;
+      }
       await finalizeSession(finishedSession).catch(async (e) => {
         await setRecorderStatus({
           ...recorderStatus,

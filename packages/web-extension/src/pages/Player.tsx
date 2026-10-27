@@ -10,6 +10,7 @@ import {
   Center,
 } from '@chakra-ui/react';
 import { getEvents, getSession } from '~/utils/storage';
+import { agentMarkerTags, withAgentMarkers } from '~/agent/markers';
 
 export default function Player() {
   const playerElRef = useRef<HTMLDivElement>(null);
@@ -19,15 +20,14 @@ export default function Player() {
 
   useEffect(() => {
     if (!sessionId) return;
-    getSession(sessionId)
-      .then((session) => {
-        setSessionName(session.name);
-      })
-      .catch((err) => {
-        console.error(err);
-      });
-    getEvents(sessionId)
-      .then((events) => {
+    const session = getSession(sessionId).catch((err) => {
+      console.error(err);
+      return undefined;
+    });
+    void session.then((s) => s && setSessionName(s.name));
+    Promise.all([getEvents(sessionId), session])
+      .then(([events, s]) => {
+        const markers = s?.agentMarkers ?? [];
         if (!playerElRef.current) return;
         if (playerRef.current) return;
 
@@ -40,7 +40,8 @@ export default function Player() {
         playerRef.current = new Replayer({
           target: playerElRef.current as HTMLElement,
           props: {
-            events,
+            events: withAgentMarkers(events, markers),
+            tags: agentMarkerTags(markers),
             autoPlay: true,
           },
         });

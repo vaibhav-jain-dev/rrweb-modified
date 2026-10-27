@@ -13,6 +13,7 @@ import type {
   ServerMessage,
 } from '../../web-extension/src/agent/protocol.ts';
 import type { AgentConfig } from './config/types.ts';
+import { handleMcpRequest } from './mcp.ts';
 import type { ModelClient } from './model/types.ts';
 import { SessionRuntime } from './session.ts';
 import type { ToolRegistry } from './tools/registry.ts';
@@ -63,6 +64,15 @@ export function createAgentServer(opts: ServerOptions): AgentServer {
       /^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/.test(o)
       ? o
       : undefined;
+  };
+
+  /** On loopback, the Host values a local client can send; anything else is DNS rebinding. */
+  const loopbackHosts = (): string[] | undefined => {
+    const host = opts.host ?? '127.0.0.1';
+    if (!['127.0.0.1', 'localhost', '::1'].includes(host)) return undefined;
+    const addr = server.address();
+    const port = typeof addr === 'object' && addr ? addr.port : opts.port;
+    return [`127.0.0.1:${port}`, `localhost:${port}`, `[::1]:${port}`];
   };
 
   const json = (
@@ -139,6 +149,18 @@ export function createAgentServer(opts: ServerOptions): AgentServer {
       });
 
     const path = url.pathname.replace(/\/+$/, '') || '/';
+
+    if (path === '/mcp') {
+      // MCP clients send no Origin; a web page does, and may not use this.
+      if (req.headers.origin && !o)
+        return json(req, res, 403, { ok: false, message: 'origin not allowed' });
+      return handleMcpRequest(
+        req,
+        res,
+        { registry: opts.registry, sessions, version: VERSION },
+        loopbackHosts(),
+      );
+    }
 
     if (req.method === 'GET' && path === '/health') {
       const health: HealthResponse = {

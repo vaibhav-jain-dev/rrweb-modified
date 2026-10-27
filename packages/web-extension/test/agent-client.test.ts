@@ -307,6 +307,24 @@ describe('stop', () => {
     expect((await done)?.ledger.lanes).toHaveLength(1);
   });
 
+  it('retries at once and waits only briefly when the backend is already gone at Stop', async () => {
+    const client = make()!;
+    sock().open();
+    const l = result([lane([check()])]).ledger;
+    sock().receive({ type: 'ledger.update', sessionId: 's1', ledger: l });
+    sock().drop();
+    let out: Awaited<ReturnType<typeof client.stop>> | 'pending' = 'pending';
+    void client.stop(9000).then((r) => (out = r));
+    // the retry does not wait for the backoff timer
+    expect(MockSocket.all).toHaveLength(2);
+    sock().drop();
+    await c.advance(2999);
+    expect(out).toBe('pending');
+    await c.advance(1);
+    expect(out).toMatchObject({ ledger: { incomplete: true } });
+    expect(c.pending()).toBe(0);
+  });
+
   it('returns nothing, rather than inventing a ledger, if it never received one', async () => {
     const client = make()!;
     sock().open();
